@@ -11,6 +11,7 @@ import { registerGetProcessLineFlowStateTool } from './tools/getProcessLineFlowS
 import { registerGetProductsTool } from './tools/getProducts.js';
 import { registerGetPriceListsTool } from './tools/getPriceLists.js';
 import { registerGetProductsPriceListsTool } from './tools/getProductsPriceLists.js';
+import { registerResolveProductTool } from './tools/resolveProduct.js';
 
 export interface McpServerDependencies {
   chatRepository: ChatRepositoryContract;
@@ -47,6 +48,10 @@ export function createMcpServer(dependencies: McpServerDependencies): McpServer 
   });
   registerGetProductsPriceListsTool(server, {
     itemPriceRepository: dependencies.itemPriceRepository,
+    logger
+  });
+  registerResolveProductTool(server, {
+    productRepository: dependencies.productRepository,
     logger
   });
 

@@ -15,14 +15,16 @@ export const getProductsInputSchema = z.object({
   Limit: z.number().int().min(1).max(100).default(50)
 });
 
+export const productOutputSchema = z.object({
+  IdItem: z.number(),
+  ItemCode: z.string().nullable(),
+  ItemName: z.string().nullable(),
+  LongDescription: z.string().nullable(),
+  Price: z.number().nullable()
+});
+
 export const productsOutputSchema = z.object({
-  Products: z.array(z.object({
-    IdItem: z.number(),
-    ItemCode: z.string().nullable(),
-    ItemName: z.string().nullable(),
-    LongDescription: z.string().nullable(),
-    Price: z.number().nullable()
-  }))
+  Products: z.array(productOutputSchema)
 });
 
 const TOOL_NAME = 'get_products';

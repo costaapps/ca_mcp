@@ -75,7 +75,14 @@ describe('MCP HTTP server', () => {
           LongDescription: 'Descrição do carro',
           Price: 100
         }
-      ])
+      ]),
+      getProductById: vi.fn().mockResolvedValue({
+        IdItem: 10,
+        ItemCode: 'CAR-10',
+        ItemName: 'Carro',
+        LongDescription: 'Descrição do carro',
+        Price: 100
+      })
     };
     priceListRepository = {
       getPriceLists: vi.fn().mockResolvedValue([
@@ -119,7 +126,8 @@ describe('MCP HTTP server', () => {
       'get_process_line_flow_state',
       'get_products',
       'get_pricelists',
-      'get_products_pricelists'
+      'get_products_pricelists',
+      'resolve_product'
     ]);
 
     const health = await fetch(`http://127.0.0.1:${(server.address() as { port: number }).port}/health`);
@@ -243,6 +251,7 @@ describe('MCP HTTP server', () => {
         Price: 100
       }]
     });
+    expect(result._meta).toBeUndefined();
     expect(productRepository.getProducts).toHaveBeenCalledWith({
       idCompany: 1003,
       itemCode: 'car',
@@ -342,5 +351,63 @@ describe('MCP HTTP server', () => {
     expect(result.isError).toBe(true);
     expect(result.structuredContent).toEqual({ Code: 'DATABASE_ERROR' });
     expect(logger.serverError).toHaveBeenCalledWith(expect.objectContaining({ message: 'erro ERP' }));
+  });
+
+  it('resolve_product confirma o item e publica Resolved.IdItem', async () => {
+    const result = await client.callTool({
+      name: 'resolve_product',
+      arguments: { IdItem: 10 },
+      _meta: { ca: { Execution: { IdCompany: 1003, IdChat: 123 } } }
+    });
+
+    expect(result.isError).not.toBe(true);
+    expect(result.structuredContent).toEqual({
+      Product: {
+        IdItem: 10,
+        ItemCode: 'CAR-10',
+        ItemName: 'Carro',
+        LongDescription: 'Descrição do carro',
+        Price: 100
+      }
+    });
+    expect(result._meta).toEqual({ ca: { Resolved: { IdItem: 10 } } });
+    expect(productRepository.getProductById).toHaveBeenCalledWith({
+      idCompany: 1003,
+      idItem: 10
+    });
+  });
+
+  it('resolve_product exige empresa e não resolve produto inexistente', async () => {
+    const missingCompany = await client.callTool({
+      name: 'resolve_product',
+      arguments: { IdItem: 10 }
+    });
+    expect(missingCompany.isError).toBe(true);
+    expect(missingCompany.structuredContent).toEqual({
+      Code: 'MISSING_CONTEXT',
+      Required: 'Execution.IdCompany'
+    });
+    expect(productRepository.getProductById).not.toHaveBeenCalled();
+
+    vi.mocked(productRepository.getProductById).mockResolvedValueOnce(null);
+    const notFound = await client.callTool({
+      name: 'resolve_product',
+      arguments: { IdItem: 999 },
+      _meta: { ca: { Execution: { IdCompany: 1003 } } }
+    });
+    expect(notFound.isError).toBe(true);
+    expect(notFound.structuredContent).toEqual({ Code: 'PRODUCT_NOT_FOUND' });
+    expect(notFound._meta).toBeUndefined();
+  });
+
+  it('rejeita IdItem inválido em resolve_product', async () => {
+    const result = await client.callTool({
+      name: 'resolve_product',
+      arguments: { IdItem: 0 },
+      _meta: { ca: { Execution: { IdCompany: 1003 } } }
+    });
+
+    expect(result.isError).toBe(true);
+    expect(productRepository.getProductById).not.toHaveBeenCalled();
   });
 });

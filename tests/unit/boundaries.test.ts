@@ -30,7 +30,11 @@ describe('PoC MCP boundaries', () => {
     )).join('\n');
     const tools = [
       readFileSync(resolve(process.cwd(), 'src/mcp/tools/getChatHistory.ts'), 'utf8'),
-      readFileSync(resolve(process.cwd(), 'src/mcp/tools/getProcessLineFlowState.ts'), 'utf8')
+      readFileSync(resolve(process.cwd(), 'src/mcp/tools/getProcessLineFlowState.ts'), 'utf8'),
+      readFileSync(resolve(process.cwd(), 'src/mcp/tools/getProducts.ts'), 'utf8'),
+      readFileSync(resolve(process.cwd(), 'src/mcp/tools/getPriceLists.ts'), 'utf8'),
+      readFileSync(resolve(process.cwd(), 'src/mcp/tools/getProductsPriceLists.ts'), 'utf8'),
+      readFileSync(resolve(process.cwd(), 'src/mcp/tools/resolveProduct.ts'), 'utf8')
     ].join('\n');
 
     expect(chatRepository).toContain('eq(message.idChat, idChat)');

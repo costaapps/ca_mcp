@@ -90,6 +90,35 @@ describe('ERP repositories', () => {
     expect(fake.limit).toHaveBeenCalledWith(100);
   });
 
+  it('getProductById retorna somente produto ativo da empresa e limita a um registro', async () => {
+    const rows = [{
+      idItem: 10,
+      itemCode: 'CAR-10',
+      itemName: 'Carro',
+      longDescription: 'Descrição',
+      price: 100
+    }];
+    const limit = vi.fn().mockResolvedValue(rows);
+    const where = vi.fn().mockReturnValue({ limit });
+    const from = vi.fn().mockReturnValue({ where });
+    const select = vi.fn().mockReturnValue({ from });
+    const db = { select } as unknown as McpDatabase;
+
+    const result = await new ProductRepository(db).getProductById({
+      idCompany: 7,
+      idItem: 10
+    });
+
+    expect(result).toEqual({
+      IdItem: 10,
+      ItemCode: 'CAR-10',
+      ItemName: 'Carro',
+      LongDescription: 'Descrição',
+      Price: 100
+    });
+    expect(limit).toHaveBeenCalledWith(1);
+  });
+
   it('getProductsPriceLists filtra por empresa e item, sem truncar relações', async () => {
     const limit = vi.fn();
     const orderBy = vi.fn().mockResolvedValue([
