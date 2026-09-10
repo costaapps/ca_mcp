@@ -2,13 +2,22 @@ import { McpServer } from '@modelcontextprotocol/server';
 
 import type { ChatRepositoryContract } from '../database/repositories/chatRepository.js';
 import type { FlowRepositoryContract } from '../database/repositories/flowRepository.js';
+import type { ProductRepositoryContract } from '../database/repositories/productRepository.js';
+import type { PriceListRepositoryContract } from '../database/repositories/priceListRepository.js';
+import type { ItemPriceRepositoryContract } from '../database/repositories/itemPriceRepository.js';
 import { consoleMcpLogger, type McpLogger } from './logger.js';
 import { registerGetChatHistoryTool } from './tools/getChatHistory.js';
 import { registerGetProcessLineFlowStateTool } from './tools/getProcessLineFlowState.js';
+import { registerGetProductsTool } from './tools/getProducts.js';
+import { registerGetPriceListsTool } from './tools/getPriceLists.js';
+import { registerGetProductsPriceListsTool } from './tools/getProductsPriceLists.js';
 
 export interface McpServerDependencies {
   chatRepository: ChatRepositoryContract;
   flowRepository: FlowRepositoryContract;
+  productRepository: ProductRepositoryContract;
+  priceListRepository: PriceListRepositoryContract;
+  itemPriceRepository: ItemPriceRepositoryContract;
   logger?: McpLogger;
 }
 
@@ -26,6 +35,18 @@ export function createMcpServer(dependencies: McpServerDependencies): McpServer 
   });
   registerGetProcessLineFlowStateTool(server, {
     flowRepository: dependencies.flowRepository,
+    logger
+  });
+  registerGetProductsTool(server, {
+    productRepository: dependencies.productRepository,
+    logger
+  });
+  registerGetPriceListsTool(server, {
+    priceListRepository: dependencies.priceListRepository,
+    logger
+  });
+  registerGetProductsPriceListsTool(server, {
+    itemPriceRepository: dependencies.itemPriceRepository,
     logger
   });
 

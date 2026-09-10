@@ -7,12 +7,18 @@ import { loadEnv } from './config/env.js';
 import { createDatabase } from './database/connection.js';
 import { ChatRepository } from './database/repositories/chatRepository.js';
 import { FlowRepository } from './database/repositories/flowRepository.js';
+import { ProductRepository } from './database/repositories/productRepository.js';
+import { PriceListRepository } from './database/repositories/priceListRepository.js';
+import { ItemPriceRepository } from './database/repositories/itemPriceRepository.js';
 
 const config = loadEnv();
 const database = createDatabase(config.db);
 const app = createApp({
   chatRepository: new ChatRepository(database.db),
-  flowRepository: new FlowRepository(database.db)
+  flowRepository: new FlowRepository(database.db),
+  productRepository: new ProductRepository(database.db),
+  priceListRepository: new PriceListRepository(database.db),
+  itemPriceRepository: new ItemPriceRepository(database.db)
 });
 const server = createServer(app);
 

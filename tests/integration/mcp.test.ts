@@ -6,6 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createApp } from '../../src/app.js';
 import type { ChatRepositoryContract } from '../../src/database/repositories/chatRepository.js';
 import type { FlowRepositoryContract } from '../../src/database/repositories/flowRepository.js';
+import type { ProductRepositoryContract } from '../../src/database/repositories/productRepository.js';
+import type { PriceListRepositoryContract } from '../../src/database/repositories/priceListRepository.js';
+import type { ItemPriceRepositoryContract } from '../../src/database/repositories/itemPriceRepository.js';
 import type { McpLogger } from '../../src/mcp/logger.js';
 
 function listen(server: Server): Promise<number> {
@@ -28,6 +31,9 @@ describe('MCP HTTP server', () => {
   let transport: StreamableHTTPClientTransport;
   let chatRepository: ChatRepositoryContract;
   let flowRepository: FlowRepositoryContract;
+  let productRepository: ProductRepositoryContract;
+  let priceListRepository: PriceListRepositoryContract;
+  let itemPriceRepository: ItemPriceRepositoryContract;
   let logger: McpLogger;
 
   beforeEach(async () => {
@@ -60,12 +66,40 @@ describe('MCP HTTP server', () => {
         }
       ])
     };
+    productRepository = {
+      getProducts: vi.fn().mockResolvedValue([
+        {
+          IdItem: 10,
+          ItemCode: 'CAR-10',
+          ItemName: 'Carro',
+          LongDescription: 'Descrição do carro',
+          Price: 100
+        }
+      ])
+    };
+    priceListRepository = {
+      getPriceLists: vi.fn().mockResolvedValue([
+        { IdPriceList: 20, Code: 'STANDARD', Description: 'Tabela padrão' }
+      ])
+    };
+    itemPriceRepository = {
+      getProductsPriceLists: vi.fn().mockResolvedValue([
+        { IdItemPrice: 30, IdItem: 10, IdPriceList: 20, Price: 95 }
+      ])
+    };
     logger = {
       toolCompleted: vi.fn(),
       serverError: vi.fn()
     };
 
-    server = createServer(createApp({ chatRepository, flowRepository, logger }));
+    server = createServer(createApp({
+      chatRepository,
+      flowRepository,
+      productRepository,
+      priceListRepository,
+      itemPriceRepository,
+      logger
+    }));
     const port = await listen(server);
     client = new Client({ name: 'ca-mcp-test-client', version: '0.1.0' });
     transport = new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`));
@@ -78,11 +112,14 @@ describe('MCP HTTP server', () => {
     await close(server);
   });
 
-  it('inicializa, lista somente as duas tools e responde health', async () => {
+  it('inicializa, lista as cinco tools e responde health', async () => {
     const tools = await client.listTools();
     expect(tools.tools.map((tool) => tool.name)).toEqual([
       'get_chat_history',
-      'get_process_line_flow_state'
+      'get_process_line_flow_state',
+      'get_products',
+      'get_pricelists',
+      'get_products_pricelists'
     ]);
 
     const health = await fetch(`http://127.0.0.1:${(server.address() as { port: number }).port}/health`);
@@ -187,5 +224,123 @@ describe('MCP HTTP server', () => {
       { type: 'text', text: 'Não foi possível consultar o histórico da conversa.' }
     ]);
     expect(logger.serverError).toHaveBeenCalledWith(expect.objectContaining({ message: 'segredo do banco' }));
+  });
+
+  it('executa get_products com IdCompany, filtros funcionais e structuredContent enxuto', async () => {
+    const result = await client.callTool({
+      name: 'get_products',
+      arguments: { ItemCode: 'car', ItemName: 'carro', Limit: 20 },
+      _meta: { ca: { Execution: { IdCompany: 1003, IdChat: 123 } } }
+    });
+
+    expect(result.isError).not.toBe(true);
+    expect(result.structuredContent).toEqual({
+      Products: [{
+        IdItem: 10,
+        ItemCode: 'CAR-10',
+        ItemName: 'Carro',
+        LongDescription: 'Descrição do carro',
+        Price: 100
+      }]
+    });
+    expect(productRepository.getProducts).toHaveBeenCalledWith({
+      idCompany: 1003,
+      itemCode: 'car',
+      itemName: 'carro',
+      limit: 20
+    });
+    expect(chatRepository.getChatHistory).not.toHaveBeenCalled();
+    expect(flowRepository.getProcessLineFlowState).not.toHaveBeenCalled();
+  });
+
+  it('aplica limite padrão em get_products e exige Execution.IdCompany', async () => {
+    const result = await client.callTool({
+      name: 'get_products',
+      arguments: {},
+      _meta: { ca: { Execution: { IdCompany: 1003 } } }
+    });
+
+    expect(result.isError).not.toBe(true);
+    expect(productRepository.getProducts).toHaveBeenCalledWith({
+      idCompany: 1003,
+      itemCode: undefined,
+      itemName: undefined,
+      limit: 50
+    });
+
+    const missingContext = await client.callTool({
+      name: 'get_products',
+      arguments: {}
+    });
+    expect(missingContext.isError).toBe(true);
+    expect(missingContext.structuredContent).toEqual({
+      Code: 'MISSING_CONTEXT',
+      Required: 'Execution.IdCompany'
+    });
+  });
+
+  it('executa get_pricelists somente com Execution.IdCompany', async () => {
+    const result = await client.callTool({
+      name: 'get_pricelists',
+      arguments: { Limit: 10 },
+      _meta: { ca: { Execution: { IdCompany: 1003, IdItem: 999 } } }
+    });
+
+    expect(result.isError).not.toBe(true);
+    expect(result.structuredContent).toEqual({
+      PriceLists: [{ IdPriceList: 20, Code: 'STANDARD', Description: 'Tabela padrão' }]
+    });
+    expect(priceListRepository.getPriceLists).toHaveBeenCalledWith({
+      idCompany: 1003,
+      limit: 10
+    });
+    expect(itemPriceRepository.getProductsPriceLists).not.toHaveBeenCalled();
+  });
+
+  it('executa get_products_pricelists com Execution.IdCompany e Resolved.IdItem', async () => {
+    const result = await client.callTool({
+      name: 'get_products_pricelists',
+      arguments: {},
+      _meta: { ca: { Execution: { IdCompany: 1003, IdChat: 123 }, Resolved: { IdItem: 10 } } }
+    });
+
+    expect(result.isError).not.toBe(true);
+    expect(result.structuredContent).toEqual({
+      ProductsPriceLists: [{ IdItemPrice: 30, IdItem: 10, IdPriceList: 20, Price: 95 }]
+    });
+    expect(itemPriceRepository.getProductsPriceLists).toHaveBeenCalledWith({
+      idCompany: 1003,
+      idItem: 10
+    });
+    expect(productRepository.getProducts).not.toHaveBeenCalled();
+  });
+
+  it('exige Resolved.IdItem para get_products_pricelists', async () => {
+    const result = await client.callTool({
+      name: 'get_products_pricelists',
+      arguments: {},
+      _meta: { ca: { Execution: { IdCompany: 1003 } } }
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toEqual({
+      Code: 'MISSING_CONTEXT',
+      Required: 'Resolved.IdItem'
+    });
+    expect(itemPriceRepository.getProductsPriceLists).not.toHaveBeenCalled();
+  });
+
+  it('retorna DATABASE_ERROR para falha nas consultas ERP', async () => {
+    vi.mocked(priceListRepository.getPriceLists).mockRejectedValueOnce(new Error('erro ERP'));
+
+    const result = await client.callTool({
+      name: 'get_pricelists',
+      arguments: {},
+      _meta: { ca: { Execution: { IdCompany: 1003 } } }
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toEqual({ Code: 'DATABASE_ERROR' });
+    expect(logger.serverError).toHaveBeenCalledWith(expect.objectContaining({ message: 'erro ERP' }));
   });
 });
