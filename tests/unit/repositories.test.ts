@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { McpDatabase } from '../../src/database/connection.js';
-import { ChatRepository, chatRepositoryInternals } from '../../src/database/repositories/chatRepository.js';
+import { CHAT_HISTORY_LIMIT, ChatRepository, chatRepositoryInternals } from '../../src/database/repositories/chatRepository.js';
 import { FlowRepository, flowRepositoryInternals } from '../../src/database/repositories/flowRepository.js';
 
 interface FakeQuery<T> {
@@ -10,11 +10,20 @@ interface FakeQuery<T> {
   from: ReturnType<typeof vi.fn>;
   where: ReturnType<typeof vi.fn>;
   orderBy: ReturnType<typeof vi.fn>;
+  limit: ReturnType<typeof vi.fn>;
   rows: T[];
 }
 
-function fakeDatabase<T>(rows: T[], sortRows?: (input: T[]) => T[]): FakeQuery<T> {
-  const orderBy = vi.fn().mockImplementation(async () => sortRows?.([...rows]) ?? rows);
+function fakeDatabase<T>(
+  rows: T[],
+  sortRows?: (input: T[]) => T[],
+  withLimit = false
+): FakeQuery<T> {
+  const limit = vi.fn().mockResolvedValue(sortRows?.([...rows]) ?? rows);
+  const orderBy = vi.fn().mockImplementation(() => {
+    if (withLimit) return { limit };
+    return Promise.resolve(sortRows?.([...rows]) ?? rows);
+  });
   const where = vi.fn().mockReturnValue({ orderBy });
   const from = vi.fn().mockReturnValue({ where });
   const select = vi.fn().mockReturnValue({ from });
@@ -25,6 +34,7 @@ function fakeDatabase<T>(rows: T[], sortRows?: (input: T[]) => T[]): FakeQuery<T
     from,
     where,
     orderBy,
+    limit,
     rows
   };
 }
@@ -41,8 +51,8 @@ describe('ChatRepository', () => {
     ], (rows) => rows.sort((a, b) => {
       const left = a as { dateTimeMessage: Date; idMessage: number };
       const right = b as { dateTimeMessage: Date; idMessage: number };
-      return left.dateTimeMessage.getTime() - right.dateTimeMessage.getTime() || left.idMessage - right.idMessage;
-    }));
+      return right.dateTimeMessage.getTime() - left.dateTimeMessage.getTime() || right.idMessage - left.idMessage;
+    }), true);
 
     const repository = new ChatRepository(fake.db);
     const result = await repository.getChatHistory(123);
@@ -66,6 +76,7 @@ describe('ChatRepository', () => {
     expect(fake.where).toHaveBeenCalledTimes(1);
     expect(fake.orderBy).toHaveBeenCalledTimes(1);
     expect(fake.orderBy.mock.calls[0]).toHaveLength(2);
+    expect(fake.limit).toHaveBeenCalledWith(CHAT_HISTORY_LIMIT);
   });
 
   it('preserva SenderType real e usa UNKNOWN somente quando não há valor', () => {
@@ -75,8 +86,8 @@ describe('ChatRepository', () => {
   });
 
   it('propaga erro de banco para a camada da tool', async () => {
-    const fake = fakeDatabase([]);
-    fake.orderBy.mockRejectedValueOnce(new Error('db down'));
+    const fake = fakeDatabase([], undefined, true);
+    fake.limit.mockRejectedValueOnce(new Error('db down'));
     const repository = new ChatRepository(fake.db);
 
     await expect(repository.getChatHistory(123)).rejects.toThrow('db down');

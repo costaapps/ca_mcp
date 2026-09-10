@@ -1,4 +1,4 @@
-import { and, asc, eq, isNotNull, ne } from 'drizzle-orm';
+import { and, desc, eq, isNotNull, ne } from 'drizzle-orm';
 
 import type { McpDatabase } from '../connection.js';
 import { message } from '../schema/message.js';
@@ -11,6 +11,8 @@ export interface ChatHistoryMessage {
 export interface ChatRepositoryContract {
   getChatHistory(idChat: number): Promise<ChatHistoryMessage[]>;
 }
+
+export const CHAT_HISTORY_LIMIT = 15;
 
 function toSender(senderType: string | null): string {
   const sender = senderType?.trim();
@@ -42,9 +44,10 @@ export class ChatRepository implements ChatRepositoryContract {
           ne(message.messageText, '')
         )
       )
-      .orderBy(asc(message.dateTimeMessage), asc(message.idMessage));
+      .orderBy(desc(message.dateTimeMessage), desc(message.idMessage))
+      .limit(CHAT_HISTORY_LIMIT);
 
-    return rows.flatMap((row) => {
+    return [...rows].reverse().flatMap((row) => {
       const text = toText(row.text);
       return text === null ? [] : [{ Sender: toSender(row.senderType), Text: text }];
     });
