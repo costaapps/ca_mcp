@@ -67,7 +67,7 @@ export class ProductRepository implements ProductRepositoryContract {
     const conditions: SQL[] = [
       eq(erpItem.idCompany, search.idCompany),
       eq(erpItem.active, 'Y'),
-      sql`UPPER(${erpItem.status}) = UPPER('Active')`
+      sql`UPPER(${erpItem.status}) = UPPER('Ativo')`
     ];
 
     const itemCode = search.itemCode?.trim();
