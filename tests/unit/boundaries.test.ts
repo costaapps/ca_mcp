@@ -45,4 +45,25 @@ describe('PoC MCP boundaries', () => {
     expect(erpRepositories).not.toContain('sql.raw');
     expect(tools).not.toMatch(/\bSELECT\b|\bINSERT\b|\bUPDATE\b|\bDELETE\b/i);
   });
+
+  it('mantém as Flow tools atrás do CoreFlowClient e fora do banco', () => {
+    const flowTools = [
+      'listFlowActions.ts',
+      'describeFlowAction.ts',
+      'executeFlowAction.ts'
+    ].map((file) => readFileSync(
+      resolve(process.cwd(), 'src/mcp/tools', file),
+      'utf8'
+    )).join('\n');
+    const server = readFileSync(resolve(process.cwd(), 'src/mcp/server.ts'), 'utf8');
+
+    expect(flowTools).toContain("CoreFlowClientContract");
+    expect(flowTools).not.toMatch(/database\/|Repository|processLineFlow|FlowRepository/);
+    expect(flowTools).not.toContain('fetch(');
+    expect(readFileSync(resolve(process.cwd(), 'src/core/CoreFlowClient.ts'), 'utf8')).toContain('fetchFn');
+    expect(server).toContain('coreFlowClient: CoreFlowClientContract');
+    expect(server).toContain('registerListFlowActionsTool');
+    expect(server).toContain('registerDescribeFlowActionTool');
+    expect(server).toContain('registerExecuteFlowActionTool');
+  });
 });

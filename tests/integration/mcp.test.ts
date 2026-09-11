@@ -9,6 +9,7 @@ import type { FlowRepositoryContract } from '../../src/database/repositories/flo
 import type { ProductRepositoryContract } from '../../src/database/repositories/productRepository.js';
 import type { PriceListRepositoryContract } from '../../src/database/repositories/priceListRepository.js';
 import type { ItemPriceRepositoryContract } from '../../src/database/repositories/itemPriceRepository.js';
+import type { CoreFlowClientContract } from '../../src/core/contracts.js';
 import type { McpLogger } from '../../src/mcp/logger.js';
 
 function listen(server: Server): Promise<number> {
@@ -34,6 +35,7 @@ describe('MCP HTTP server', () => {
   let productRepository: ProductRepositoryContract;
   let priceListRepository: PriceListRepositoryContract;
   let itemPriceRepository: ItemPriceRepositoryContract;
+  let coreFlowClient: CoreFlowClientContract;
   let logger: McpLogger;
 
   beforeEach(async () => {
@@ -94,6 +96,41 @@ describe('MCP HTTP server', () => {
         { IdItemPrice: 30, IdItem: 10, IdPriceList: 20, Price: 95 }
       ])
     };
+    coreFlowClient = {
+      listFlowActions: vi.fn().mockResolvedValue({
+        Success: true,
+        ExecutionUUID: 'execution-1',
+        Data: {
+          Actions: [{ Action: 'get_customer_details', Description: 'Consulta cliente.' }]
+        }
+      }),
+      describeFlowAction: vi.fn().mockResolvedValue({
+        Success: true,
+        ExecutionUUID: 'execution-1',
+        Data: {
+          Action: 'get_customer_details',
+          Description: 'Consulta cliente.',
+          Repeatable: true,
+          Available: false,
+          ExecutionCount: 1,
+          UnavailableReason: 'Já executada neste estado.',
+          RequiredInputs: ['CustomerCode']
+        }
+      }),
+      executeFlowAction: vi.fn().mockResolvedValue({
+        Success: true,
+        ExecutionUUID: 'execution-1',
+        Data: {
+          Action: 'get_customer_details',
+          Output: { CustomerCode: 'C000123' },
+          Invocation: {
+            InvocationUUID: 'invocation-1',
+            IdFlow: 11023,
+            IdProcessLineFlow: 82361
+          }
+        }
+      })
+    };
     logger = {
       toolCompleted: vi.fn(),
       serverError: vi.fn()
@@ -105,6 +142,7 @@ describe('MCP HTTP server', () => {
       productRepository,
       priceListRepository,
       itemPriceRepository,
+      coreFlowClient,
       logger
     }));
     const port = await listen(server);
@@ -119,7 +157,7 @@ describe('MCP HTTP server', () => {
     await close(server);
   });
 
-  it('inicializa, lista as cinco tools e responde health', async () => {
+  it('inicializa, lista as nove tools e responde health', async () => {
     const tools = await client.listTools();
     expect(tools.tools.map((tool) => tool.name)).toEqual([
       'get_chat_history',
@@ -127,7 +165,10 @@ describe('MCP HTTP server', () => {
       'get_products',
       'get_pricelists',
       'get_products_pricelists',
-      'resolve_product'
+      'resolve_product',
+      'list_flow_actions',
+      'describe_flow_action',
+      'execute_flow_action'
     ]);
 
     const health = await fetch(`http://127.0.0.1:${(server.address() as { port: number }).port}/health`);
@@ -409,5 +450,143 @@ describe('MCP HTTP server', () => {
 
     expect(result.isError).toBe(true);
     expect(productRepository.getProductById).not.toHaveBeenCalled();
+  });
+
+  it('integra list_flow_actions com o Core usando apenas Execution', async () => {
+    const result = await client.callTool({
+      name: 'list_flow_actions',
+      arguments: {},
+      _meta: {
+        ca: {
+          Execution: {
+            ExecutionUUID: 'execution-1',
+            TurnUUID: 'turn-1',
+            IdCompany: 1003,
+            IdProcessLine: 456,
+            IdProcessLineFlow: 999
+          }
+        }
+      }
+    });
+
+    expect(result.isError).not.toBe(true);
+    expect(result.structuredContent).toEqual({
+      Actions: [{ Action: 'get_customer_details', Description: 'Consulta cliente.' }]
+    });
+    expect(coreFlowClient.listFlowActions).toHaveBeenCalledWith({
+      ExecutionUUID: 'execution-1',
+      TurnUUID: 'turn-1',
+      IdCompany: 1003,
+      IdProcessLine: 456
+    });
+    expect(flowRepository.getProcessLineFlowState).not.toHaveBeenCalled();
+  });
+
+  it('integra describe_flow_action e mantém Available=false como sucesso', async () => {
+    const result = await client.callTool({
+      name: 'describe_flow_action',
+      arguments: { Action: 'get_customer_details' },
+      _meta: { ca: { Execution: {
+        ExecutionUUID: 'execution-1',
+        IdCompany: 1003,
+        IdProcessLine: 456
+      } } }
+    });
+
+    expect(result.isError).not.toBe(true);
+    expect(result.structuredContent).toEqual({
+      Action: 'get_customer_details',
+      Description: 'Consulta cliente.',
+      Repeatable: true,
+      Available: false,
+      ExecutionCount: 1,
+      UnavailableReason: 'Já executada neste estado.',
+      RequiredInputs: ['CustomerCode']
+    });
+    expect(coreFlowClient.describeFlowAction).toHaveBeenCalledWith({
+      ExecutionUUID: 'execution-1',
+      IdCompany: 1003,
+      IdProcessLine: 456,
+      Action: 'get_customer_details'
+    });
+  });
+
+  it('integra execute_flow_action, gera RequestUUID e oculta FlowInvocation no conteúdo', async () => {
+    const requestUUID = 'request-1';
+    const result = await client.callTool({
+      name: 'execute_flow_action',
+      arguments: {
+        Action: 'get_customer_details',
+        Input: { CustomerCode: 'C000123', IncludeAddresses: true }
+      },
+      _meta: { ca: { Execution: {
+        ExecutionUUID: 'execution-1',
+        TurnUUID: 'turn-1',
+        IdCompany: 1003,
+        IdProcessLine: 456
+      } } }
+    });
+
+    expect(result.isError).not.toBe(true);
+    expect(result.structuredContent).toEqual({
+      Success: true,
+      Action: 'get_customer_details',
+      Output: { CustomerCode: 'C000123' }
+    });
+    expect(result.structuredContent).not.toHaveProperty('Invocation');
+    expect(result._meta).toEqual({ ca: { FlowInvocation: {
+      InvocationUUID: 'invocation-1',
+      IdFlow: 11023,
+      IdProcessLineFlow: 82361
+    } } });
+    expect(coreFlowClient.executeFlowAction).toHaveBeenCalledWith({
+      ExecutionUUID: 'execution-1',
+      TurnUUID: 'turn-1',
+      IdCompany: 1003,
+      IdProcessLine: 456,
+      RequestUUID: expect.any(String),
+      Action: 'get_customer_details',
+      Input: { CustomerCode: 'C000123', IncludeAddresses: true }
+    });
+    const request = vi.mocked(coreFlowClient.executeFlowAction).mock.calls[0]?.[0];
+    expect(request?.RequestUUID).toEqual(expect.any(String));
+    expect(request?.RequestUUID).not.toBe('execution-1');
+    expect(request?.RequestUUID).not.toBe(requestUUID);
+  });
+
+  it('integra falha de execute com isError e envelope funcional completo', async () => {
+    vi.mocked(coreFlowClient.executeFlowAction).mockResolvedValueOnce({
+      Success: false,
+      ExecutionUUID: 'execution-1',
+      Data: null,
+      Error: {
+        Code: 'FLOW_ACTION_ALREADY_EXECUTED',
+        Message: 'A capability já foi executada.'
+      }
+    });
+
+    const result = await client.callTool({
+      name: 'execute_flow_action',
+      arguments: { Action: 'get_customer_details', Input: {} },
+      _meta: { ca: { Execution: {
+        ExecutionUUID: 'execution-1',
+        IdCompany: 1003,
+        IdProcessLine: 456
+      } } }
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toEqual({
+      Success: false,
+      Action: 'get_customer_details',
+      Output: null,
+      Error: {
+        Code: 'FLOW_ACTION_ALREADY_EXECUTED',
+        Message: 'A capability já foi executada.'
+      }
+    });
+    expect(result.content).toEqual([
+      { type: 'text', text: 'A capability já foi executada.' }
+    ]);
   });
 });

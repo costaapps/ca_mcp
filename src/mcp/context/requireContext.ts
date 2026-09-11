@@ -2,6 +2,13 @@ import { ERROR_CODES } from '../../errors/errorCodes.js';
 import { McpToolError } from '../../errors/McpToolError.js';
 import { getExecutionValue, getResolvedValue, type CAMeta } from './caMeta.js';
 
+export interface FlowExecutionContext {
+  ExecutionUUID: string;
+  TurnUUID?: string;
+  IdCompany: number;
+  IdProcessLine: number;
+}
+
 function requirePositiveInteger(value: unknown, path: string): number {
   if (value === undefined || value === null) {
     throw new McpToolError(
@@ -24,6 +31,56 @@ export function requireExecutionId(meta: CAMeta, key: string): number {
 
 export function requireResolvedId(meta: CAMeta, key: string): number {
   return requirePositiveInteger(getResolvedValue(meta, key), `Resolved.${key}`);
+}
+
+export function requireExecutionString(meta: CAMeta, key: string): string {
+  const value = getExecutionValue(meta, key);
+  if (value === undefined || value === null) {
+    throw new McpToolError(
+      ERROR_CODES.MISSING_CONTEXT,
+      `Contexto obrigatório ausente: Execution.${key}`,
+      `Execution.${key}`
+    );
+  }
+
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    throw new McpToolError(
+      ERROR_CODES.INVALID_CONTEXT,
+      `Contexto inválido: Execution.${key}`,
+      `Execution.${key}`
+    );
+  }
+
+  return value;
+}
+
+export function optionalExecutionString(meta: CAMeta, key: string): string | undefined {
+  const value = getExecutionValue(meta, key);
+  if (value === undefined || value === null) return undefined;
+
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    throw new McpToolError(
+      ERROR_CODES.INVALID_CONTEXT,
+      `Contexto inválido: Execution.${key}`,
+      `Execution.${key}`
+    );
+  }
+
+  return value;
+}
+
+export function requireFlowExecutionContext(meta: CAMeta): FlowExecutionContext {
+  const context = {
+    ExecutionUUID: requireExecutionString(meta, 'ExecutionUUID'),
+    IdCompany: requireExecutionId(meta, 'IdCompany'),
+    IdProcessLine: requireExecutionId(meta, 'IdProcessLine')
+  };
+  const turnUUID = optionalExecutionString(meta, 'TurnUUID');
+
+  return {
+    ...context,
+    ...(turnUUID === undefined ? {} : { TurnUUID: turnUUID })
+  };
 }
 
 export const requireContextInternals = {

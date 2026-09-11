@@ -5,6 +5,7 @@ import type { FlowRepositoryContract } from '../database/repositories/flowReposi
 import type { ProductRepositoryContract } from '../database/repositories/productRepository.js';
 import type { PriceListRepositoryContract } from '../database/repositories/priceListRepository.js';
 import type { ItemPriceRepositoryContract } from '../database/repositories/itemPriceRepository.js';
+import type { CoreFlowClientContract } from '../core/contracts.js';
 import { consoleMcpLogger, type McpLogger } from './logger.js';
 import { registerGetChatHistoryTool } from './tools/getChatHistory.js';
 import { registerGetProcessLineFlowStateTool } from './tools/getProcessLineFlowState.js';
@@ -12,6 +13,9 @@ import { registerGetProductsTool } from './tools/getProducts.js';
 import { registerGetPriceListsTool } from './tools/getPriceLists.js';
 import { registerGetProductsPriceListsTool } from './tools/getProductsPriceLists.js';
 import { registerResolveProductTool } from './tools/resolveProduct.js';
+import { registerListFlowActionsTool } from './tools/listFlowActions.js';
+import { registerDescribeFlowActionTool } from './tools/describeFlowAction.js';
+import { registerExecuteFlowActionTool } from './tools/executeFlowAction.js';
 
 export interface McpServerDependencies {
   chatRepository: ChatRepositoryContract;
@@ -19,6 +23,7 @@ export interface McpServerDependencies {
   productRepository: ProductRepositoryContract;
   priceListRepository: PriceListRepositoryContract;
   itemPriceRepository: ItemPriceRepositoryContract;
+  coreFlowClient: CoreFlowClientContract;
   logger?: McpLogger;
 }
 
@@ -52,6 +57,18 @@ export function createMcpServer(dependencies: McpServerDependencies): McpServer 
   });
   registerResolveProductTool(server, {
     productRepository: dependencies.productRepository,
+    logger
+  });
+  registerListFlowActionsTool(server, {
+    coreFlowClient: dependencies.coreFlowClient,
+    logger
+  });
+  registerDescribeFlowActionTool(server, {
+    coreFlowClient: dependencies.coreFlowClient,
+    logger
+  });
+  registerExecuteFlowActionTool(server, {
+    coreFlowClient: dependencies.coreFlowClient,
     logger
   });
 

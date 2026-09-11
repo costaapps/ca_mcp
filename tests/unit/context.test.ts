@@ -3,7 +3,13 @@ import type { ServerContext } from '@modelcontextprotocol/server';
 import { describe, expect, it } from 'vitest';
 
 import { extractCAMeta, getExecutionValue, getResolvedValue } from '../../src/mcp/context/caMeta.js';
-import { requireExecutionId, requireResolvedId } from '../../src/mcp/context/requireContext.js';
+import {
+  optionalExecutionString,
+  requireExecutionId,
+  requireExecutionString,
+  requireFlowExecutionContext,
+  requireResolvedId
+} from '../../src/mcp/context/requireContext.js';
 
 function contextWithMeta(meta: unknown): Pick<ServerContext, 'mcpReq'> {
   return {
@@ -66,5 +72,48 @@ describe('requireContext', () => {
   it('rejeita ID não inteiro', () => {
     const meta = extractCAMeta(contextWithMeta({ ca: { Execution: { IdChat: '123' } } }));
     expect(() => requireExecutionId(meta, 'IdChat')).toThrow('Contexto inválido: Execution.IdChat');
+  });
+
+  it('exige ExecutionUUID como string não vazia e aceita TurnUUID opcional', () => {
+    const meta = extractCAMeta(contextWithMeta({
+      ca: { Execution: {
+        ExecutionUUID: 'execution-1',
+        TurnUUID: 'turn-1',
+        IdCompany: 1003,
+        IdProcessLine: 456
+      } }
+    }));
+
+    expect(requireExecutionString(meta, 'ExecutionUUID')).toBe('execution-1');
+    expect(optionalExecutionString(meta, 'TurnUUID')).toBe('turn-1');
+    expect(requireFlowExecutionContext(meta)).toEqual({
+      ExecutionUUID: 'execution-1',
+      TurnUUID: 'turn-1',
+      IdCompany: 1003,
+      IdProcessLine: 456
+    });
+  });
+
+  it('retorna erro estruturado para ExecutionUUID ausente ou inválido', () => {
+    const missing = extractCAMeta(contextWithMeta({
+      ca: { Execution: { IdCompany: 1003, IdProcessLine: 456 } }
+    }));
+    expect(() => requireExecutionString(missing, 'ExecutionUUID')).toThrow('Execution.ExecutionUUID');
+
+    const invalid = extractCAMeta(contextWithMeta({
+      ca: { Execution: { ExecutionUUID: 123, IdCompany: 1003, IdProcessLine: 456 } }
+    }));
+    expect(() => requireExecutionString(invalid, 'ExecutionUUID')).toThrow('Contexto inválido: Execution.ExecutionUUID');
+  });
+
+  it('não aceita IDs técnicos em substituição ao contexto Execution', () => {
+    const meta = extractCAMeta(contextWithMeta({
+      ca: { Execution: { IdCompany: 1003, IdProcessLine: 456 }, Resolved: {
+        ExecutionUUID: 'wrong-place',
+        IdProcessLineFlow: 999
+      } }
+    }));
+
+    expect(() => requireFlowExecutionContext(meta)).toThrow('Execution.ExecutionUUID');
   });
 });
