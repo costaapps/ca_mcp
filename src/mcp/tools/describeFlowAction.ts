@@ -43,6 +43,8 @@ export function registerDescribeFlowActionTool(
     },
     async (arguments_, ctx) => {
       const startedAt = Date.now();
+      let executionUUID: string | undefined;
+      let turnUUID: string | undefined;
 
       try {
         const parsedArguments = describeFlowActionInputSchema.safeParse(arguments_);
@@ -51,8 +53,12 @@ export function registerDescribeFlowActionTool(
         }
 
         const meta = extractCAMeta(ctx);
+        const flowContext = requireFlowExecutionContext(meta);
+        executionUUID = flowContext.ExecutionUUID;
+        turnUUID = flowContext.TurnUUID;
+        const { TurnUUID: _turnUUID, ...coreRequest } = flowContext;
         const request = {
-          ...requireFlowExecutionContext(meta),
+          ...coreRequest,
           Action: parsedArguments.data.Action
         };
         const response = await dependencies.coreFlowClient.describeFlowAction(request);
@@ -65,7 +71,9 @@ export function registerDescribeFlowActionTool(
         dependencies.logger.toolCompleted({
           tool: TOOL_NAME,
           durationMs: Date.now() - startedAt,
-          success: true
+          success: true,
+          ExecutionUUID: executionUUID,
+          TurnUUID: turnUUID
         });
 
         return {
@@ -83,7 +91,9 @@ export function registerDescribeFlowActionTool(
           tool: TOOL_NAME,
           durationMs: Date.now() - startedAt,
           success: false,
-          errorCode: normalizedError.code
+          errorCode: normalizedError.code,
+          ExecutionUUID: executionUUID,
+          TurnUUID: turnUUID
         });
 
         return toToolErrorResult(normalizedError);

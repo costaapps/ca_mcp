@@ -3,6 +3,10 @@ export interface ToolLogEvent {
   durationMs: number;
   success: boolean;
   errorCode?: string;
+  ExecutionUUID?: string;
+  TurnUUID?: string;
+  RequestUUID?: string;
+  InvocationUUID?: string;
 }
 
 export interface McpLogger {

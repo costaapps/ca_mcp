@@ -475,7 +475,6 @@ describe('MCP HTTP server', () => {
     });
     expect(coreFlowClient.listFlowActions).toHaveBeenCalledWith({
       ExecutionUUID: 'execution-1',
-      TurnUUID: 'turn-1',
       IdCompany: 1003,
       IdProcessLine: 456
     });
@@ -541,7 +540,6 @@ describe('MCP HTTP server', () => {
     } } });
     expect(coreFlowClient.executeFlowAction).toHaveBeenCalledWith({
       ExecutionUUID: 'execution-1',
-      TurnUUID: 'turn-1',
       IdCompany: 1003,
       IdProcessLine: 456,
       RequestUUID: expect.any(String),

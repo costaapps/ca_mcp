@@ -22,7 +22,6 @@ describe('CoreFlowClient', () => {
   it('normaliza a URL base e envia a requisição de listagem exata', async () => {
     const request = {
       ExecutionUUID: 'execution-1',
-      TurnUUID: 'turn-1',
       IdCompany: 1003,
       IdProcessLine: 456
     };

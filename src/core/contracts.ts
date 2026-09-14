@@ -4,7 +4,6 @@ export type JsonObject = { [key: string]: JsonValue };
 
 export interface CoreFlowContextRequest {
   ExecutionUUID: string;
-  TurnUUID?: string;
   IdCompany: number;
   IdProcessLine: number;
 }

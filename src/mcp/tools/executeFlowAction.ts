@@ -82,6 +82,10 @@ export function registerExecuteFlowActionTool(
     async (arguments_, ctx) => {
       const startedAt = Date.now();
       const action = actionFromArguments(arguments_);
+      let executionUUID: string | undefined;
+      let turnUUID: string | undefined;
+      let requestUUIDForLog: string | undefined;
+      let invocationUUID: string | undefined;
 
       try {
         const parsedArguments = executeFlowActionInputSchema.safeParse(arguments_);
@@ -91,9 +95,13 @@ export function registerExecuteFlowActionTool(
 
         const meta = extractCAMeta(ctx);
         const requestContext = requireFlowExecutionContext(meta);
+        executionUUID = requestContext.ExecutionUUID;
+        turnUUID = requestContext.TurnUUID;
+        const { TurnUUID: _turnUUID, ...coreRequest } = requestContext;
         const requestUUID = dependencies.requestUUID?.() ?? randomUUID();
+        requestUUIDForLog = requestUUID;
         const response = await dependencies.coreFlowClient.executeFlowAction({
-          ...requestContext,
+          ...coreRequest,
           RequestUUID: requestUUID,
           Action: parsedArguments.data.Action,
           Input: parsedArguments.data.Input as JsonObject
@@ -105,7 +113,10 @@ export function registerExecuteFlowActionTool(
             tool: TOOL_NAME,
             durationMs: Date.now() - startedAt,
             success: false,
-            errorCode: error.code
+            errorCode: error.code,
+            ExecutionUUID: executionUUID,
+            TurnUUID: turnUUID,
+            RequestUUID: requestUUIDForLog
           });
           return executeFailureResult(error, parsedArguments.data.Action);
         }
@@ -118,11 +129,16 @@ export function registerExecuteFlowActionTool(
             Output: response.Data.Output
           }
         };
+        invocationUUID = response.Data.Invocation.InvocationUUID;
 
         dependencies.logger.toolCompleted({
           tool: TOOL_NAME,
           durationMs: Date.now() - startedAt,
-          success: true
+          success: true,
+          ExecutionUUID: executionUUID,
+          TurnUUID: turnUUID,
+          RequestUUID: requestUUIDForLog,
+          InvocationUUID: invocationUUID
         });
 
         return withCAMeta(result, { FlowInvocation: response.Data.Invocation });
@@ -137,7 +153,11 @@ export function registerExecuteFlowActionTool(
           tool: TOOL_NAME,
           durationMs: Date.now() - startedAt,
           success: false,
-          errorCode: normalizedError.code
+          errorCode: normalizedError.code,
+          ExecutionUUID: executionUUID,
+          TurnUUID: turnUUID,
+          RequestUUID: requestUUIDForLog,
+          InvocationUUID: invocationUUID
         });
 
         return executeFailureResult(normalizedError, action);

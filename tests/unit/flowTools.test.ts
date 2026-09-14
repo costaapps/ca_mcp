@@ -78,13 +78,14 @@ describe('Flow MCP tools', () => {
     expect(result.structuredContent).toEqual({ Actions: [] });
     expect(listFlowActions).toHaveBeenCalledWith({
       ExecutionUUID: 'execution-1',
-      TurnUUID: 'turn-1',
       IdCompany: 1003,
       IdProcessLine: 456
     });
     expect(log.toolCompleted).toHaveBeenCalledWith(expect.objectContaining({
       tool: 'list_flow_actions',
-      success: true
+      success: true,
+      ExecutionUUID: 'execution-1',
+      TurnUUID: 'turn-1'
     }));
   });
 
@@ -144,7 +145,6 @@ describe('Flow MCP tools', () => {
     });
     expect(describeFlowAction).toHaveBeenCalledWith({
       ExecutionUUID: 'execution-1',
-      TurnUUID: 'turn-1',
       IdCompany: 1003,
       IdProcessLine: 456,
       Action: 'create_sales_order'
@@ -201,7 +201,6 @@ describe('Flow MCP tools', () => {
     });
     expect(executeFlowAction).toHaveBeenCalledWith({
       ExecutionUUID: 'execution-1',
-      TurnUUID: 'turn-1',
       IdCompany: 1003,
       IdProcessLine: 456,
       RequestUUID: 'request-1',
