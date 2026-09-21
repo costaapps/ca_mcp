@@ -8,7 +8,9 @@ const environmentSchema = z.object({
   DB_USER: z.string().trim().min(1, 'DB_USER é obrigatório'),
   DB_PASSWORD: z.string().default(''),
   DB_DATABASE: z.string().trim().min(1, 'DB_DATABASE é obrigatório'),
-  DB_CONNECTION_LIMIT: z.coerce.number().int().positive().default(10)
+  DB_CONNECTION_LIMIT: z.coerce.number().int().positive().default(10),
+  CORE_API_URL: z.string().trim().url().default('http://127.0.0.1:3000'),
+  CORE_API_TIMEOUT_MS: z.coerce.number().int().positive().default(60000)
 });
 
 export interface EnvConfig {
@@ -22,6 +24,8 @@ export interface EnvConfig {
     database: string;
     connectionLimit: number;
   };
+  coreApiUrl: string;
+  coreApiTimeoutMs: number;
 }
 
 export function loadEnv(environment: NodeJS.ProcessEnv = process.env): EnvConfig {
@@ -37,6 +41,8 @@ export function loadEnv(environment: NodeJS.ProcessEnv = process.env): EnvConfig
       password: parsed.DB_PASSWORD,
       database: parsed.DB_DATABASE,
       connectionLimit: parsed.DB_CONNECTION_LIMIT
-    }
+    },
+    coreApiUrl: parsed.CORE_API_URL,
+    coreApiTimeoutMs: parsed.CORE_API_TIMEOUT_MS
   };
 }

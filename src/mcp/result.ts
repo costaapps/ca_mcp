@@ -29,14 +29,42 @@ export function withResolvedMeta(
   result: CallToolResult,
   patch: Record<string, unknown>
 ): CallToolResult {
+  const currentResolved = getCAMetaRecord(result)?.Resolved;
+
+  return withCAMeta(result, {
+    Resolved: {
+      ...(typeof currentResolved === 'object' && currentResolved !== null && !Array.isArray(currentResolved)
+        ? currentResolved
+        : {}),
+      ...patch
+    }
+  });
+}
+
+export function withCAMeta(
+  result: CallToolResult,
+  patch: Record<string, unknown>
+): CallToolResult {
+  const currentCa = getCAMetaRecord(result) ?? {};
+
   return {
     ...result,
     _meta: {
       ...(result._meta ?? {}),
       ca: {
-        ...((result._meta?.ca as Record<string, unknown> | undefined) ?? {}),
-        Resolved: patch
+        ...currentCa,
+        ...patch
       }
     }
   };
+}
+
+function getCAMetaRecord(result: CallToolResult): Record<string, unknown> | undefined {
+  if (result._meta === undefined || typeof result._meta !== 'object' || result._meta === null) {
+    return undefined;
+  }
+
+  const ca = result._meta.ca;
+  if (typeof ca !== 'object' || ca === null || Array.isArray(ca)) return undefined;
+  return ca as Record<string, unknown>;
 }
