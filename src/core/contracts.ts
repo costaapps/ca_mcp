@@ -111,7 +111,7 @@ export interface CoreRequestHandoffRequest extends CoreNavigationContextRequest 
 }
 
 export interface CoreRequestHandoffData {
-  Accepted: boolean;
+  Accepted: true;
   Destination: string;
   Status: 'REQUESTED';
   HandoffUUID: string;

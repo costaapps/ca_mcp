@@ -43,15 +43,22 @@ describe.skipIf(!integrationEnabled)('Core Navigation — integração opt-in', 
     expect(listResponse.Data).toEqual({
       Destinations: expect.any(Array)
     });
-    const destinationRef = requiredEnvironment('CORE_NAVIGATION_DESTINATION_REF');
-    expect(listResponse.Data.Destinations.some(
-      (destination) => destination.DestinationRef === destinationRef
-    )).toBe(true);
+    const configuredDestinationRef = process.env.CORE_NAVIGATION_DESTINATION_REF?.trim();
+    const destination = configuredDestinationRef
+      ? listResponse.Data.Destinations.find(
+        (candidate) => candidate.DestinationRef === configuredDestinationRef
+      )
+      : listResponse.Data.Destinations[0];
+    if (!destination) {
+      throw new Error(configuredDestinationRef
+        ? 'CORE_NAVIGATION_DESTINATION_REF não foi retornado pela listagem do Core.'
+        : 'O Core não retornou destinos para o contexto configurado.');
+    }
 
     const handoffResponse = await client.requestHandoff({
       ...context,
       RequestUUID: randomUUID(),
-      DestinationRef: destinationRef,
+      DestinationRef: destination.DestinationRef,
       Reason: process.env.CORE_NAVIGATION_REASON?.trim() || 'Teste de integração MCP/Core.',
       Summary: process.env.CORE_NAVIGATION_SUMMARY?.trim() || 'Validação opt-in do contrato de Navigation.'
     });
@@ -60,10 +67,10 @@ describe.skipIf(!integrationEnabled)('Core Navigation — integração opt-in', 
       Success: true,
       ExecutionUUID: context.ExecutionUUID,
       Data: {
-        Accepted: expect.any(Boolean),
-        Destination: expect.any(String),
+        Accepted: true,
+        Destination: expect.stringMatching(/\S/),
         Status: 'REQUESTED',
-        HandoffUUID: expect.any(String)
+        HandoffUUID: expect.stringMatching(/\S/)
       }
     });
   });

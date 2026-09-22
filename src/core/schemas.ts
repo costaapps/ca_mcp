@@ -99,7 +99,7 @@ export const coreListNavigationDestinationsDataSchema = z.object({
 }).strict();
 
 export const coreRequestHandoffDataSchema = z.object({
-  Accepted: z.boolean(),
+  Accepted: z.literal(true),
   Destination: nonEmptyStringSchema,
   Status: z.literal('REQUESTED'),
   HandoffUUID: nonEmptyStringSchema

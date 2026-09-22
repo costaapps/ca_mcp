@@ -19,7 +19,7 @@ export const requestHandoffInputSchema = z.object({
 }).strict();
 
 export const requestHandoffOutputSchema = z.object({
-  Accepted: z.boolean(),
+  Accepted: z.literal(true),
   Destination: z.string().trim().min(1),
   Status: z.literal('REQUESTED')
 }).strict();

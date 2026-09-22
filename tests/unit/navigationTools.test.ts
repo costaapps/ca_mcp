@@ -313,6 +313,34 @@ describe('Navigation MCP tools', () => {
     expect(result.structuredContent).toEqual({ Code: 'CORE_CONTRACT_ERROR' });
   });
 
+  it('request_handoff rejeita Accepted=false numa resposta de sucesso', async () => {
+    const requestHandoff = vi.fn().mockResolvedValue({
+      Success: true,
+      ExecutionUUID: 'execution-1',
+      Data: {
+        Accepted: false,
+        Destination: 'Vendas',
+        Status: 'REQUESTED',
+        HandoffUUID: 'handoff-1'
+      }
+    });
+    const callback = captureCallback((server) => registerRequestHandoffTool(server, {
+      coreNavigationClient: coreClient({ requestHandoff }),
+      logger: logger(),
+      requestUUID: () => 'request-1'
+    }));
+
+    const result = await callback({
+      DestinationRef: 'random-opaque-reference',
+      Reason: 'Navegação',
+      Summary: 'Solicitação.'
+    }, contextWithMeta(executionMeta));
+
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toEqual({ Code: 'CORE_CONTRACT_ERROR' });
+    expect(result.structuredContent).not.toHaveProperty('HandoffUUID');
+  });
+
   it('não expõe IDs técnicos na entrada da listagem', () => {
     for (const technicalId of [
       'IdCompany',

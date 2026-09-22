@@ -253,6 +253,43 @@ describe('CoreNavigationClient', () => {
     })).rejects.toMatchObject({ code: 'CORE_CONTRACT_ERROR' });
   });
 
+  it('não amplia o contrato para estados internos READY/APPLYING/COMPLETED', async () => {
+    const advancedStatuses = ['READY', 'APPLYING', 'COMPLETED'];
+    const invalidResponses = [
+      {
+        ...structuredClone(canonicalRequestHandoffSuccess),
+        Data: { ...canonicalRequestHandoffSuccess.Data, Accepted: false }
+      },
+      ...advancedStatuses.map((Status) => ({
+        ...structuredClone(canonicalRequestHandoffSuccess),
+        Data: { ...canonicalRequestHandoffSuccess.Data, Status }
+      }))
+    ];
+    const fetchFn = fetchMock();
+    for (const invalidResponse of invalidResponses) {
+      fetchFn.mockResolvedValueOnce(jsonResponse(invalidResponse));
+    }
+    const client = new CoreNavigationClient({
+      baseUrl: 'http://core.internal',
+      timeoutMs: 1000,
+      fetchFn
+    });
+    const request = {
+      ...context,
+      RequestUUID: 'request-1',
+      DestinationRef: 'random-opaque-reference',
+      Reason: 'Navegação',
+      Summary: 'Solicitação de handoff.'
+    };
+
+    for (const _invalidResponse of invalidResponses) {
+      await expect(client.requestHandoff(request)).rejects.toMatchObject({
+        code: 'CORE_CONTRACT_ERROR'
+      });
+    }
+    expect(fetchFn).toHaveBeenCalledTimes(invalidResponses.length);
+  });
+
   it('não faz retry automático de request_handoff', async () => {
     const fetchFn = fetchMock();
     fetchFn.mockImplementationOnce((_url: string, init?: RequestInit) => new Promise((_resolve, reject) => {
