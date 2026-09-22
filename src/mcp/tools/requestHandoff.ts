@@ -13,7 +13,7 @@ import type { McpLogger } from '../logger.js';
 import { toToolErrorResult } from '../result.js';
 
 export const requestHandoffInputSchema = z.object({
-  DestinationRef: z.string().trim().min(1),
+  DestinationRef: z.string().min(1),
   Reason: z.string().trim().min(1),
   Summary: z.string().trim().min(1)
 }).strict();
