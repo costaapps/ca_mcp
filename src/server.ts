@@ -11,6 +11,7 @@ import { ProductRepository } from './database/repositories/productRepository.js'
 import { PriceListRepository } from './database/repositories/priceListRepository.js';
 import { ItemPriceRepository } from './database/repositories/itemPriceRepository.js';
 import { CoreFlowClient } from './core/CoreFlowClient.js';
+import { CoreNavigationClient } from './core/CoreNavigationClient.js';
 
 const config = loadEnv();
 const database = createDatabase(config.db);
@@ -21,6 +22,10 @@ const app = createApp({
   priceListRepository: new PriceListRepository(database.db),
   itemPriceRepository: new ItemPriceRepository(database.db),
   coreFlowClient: new CoreFlowClient({
+    baseUrl: config.coreApiUrl,
+    timeoutMs: config.coreApiTimeoutMs
+  }),
+  coreNavigationClient: new CoreNavigationClient({
     baseUrl: config.coreApiUrl,
     timeoutMs: config.coreApiTimeoutMs
   })

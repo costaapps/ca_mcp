@@ -6,6 +6,7 @@ import type { ProductRepositoryContract } from '../database/repositories/product
 import type { PriceListRepositoryContract } from '../database/repositories/priceListRepository.js';
 import type { ItemPriceRepositoryContract } from '../database/repositories/itemPriceRepository.js';
 import type { CoreFlowClientContract } from '../core/contracts.js';
+import type { CoreNavigationClientContract } from '../core/contracts.js';
 import { consoleMcpLogger, type McpLogger } from './logger.js';
 import { registerGetChatHistoryTool } from './tools/getChatHistory.js';
 import { registerGetProcessLineFlowStateTool } from './tools/getProcessLineFlowState.js';
@@ -16,6 +17,8 @@ import { registerResolveProductTool } from './tools/resolveProduct.js';
 import { registerListFlowActionsTool } from './tools/listFlowActions.js';
 import { registerDescribeFlowActionTool } from './tools/describeFlowAction.js';
 import { registerExecuteFlowActionTool } from './tools/executeFlowAction.js';
+import { registerListNavigationDestinationsTool } from './tools/listNavigationDestinations.js';
+import { registerRequestHandoffTool } from './tools/requestHandoff.js';
 
 export interface McpServerDependencies {
   chatRepository: ChatRepositoryContract;
@@ -24,6 +27,7 @@ export interface McpServerDependencies {
   priceListRepository: PriceListRepositoryContract;
   itemPriceRepository: ItemPriceRepositoryContract;
   coreFlowClient: CoreFlowClientContract;
+  coreNavigationClient: CoreNavigationClientContract;
   logger?: McpLogger;
 }
 
@@ -69,6 +73,14 @@ export function createMcpServer(dependencies: McpServerDependencies): McpServer 
   });
   registerExecuteFlowActionTool(server, {
     coreFlowClient: dependencies.coreFlowClient,
+    logger
+  });
+  registerListNavigationDestinationsTool(server, {
+    coreNavigationClient: dependencies.coreNavigationClient,
+    logger
+  });
+  registerRequestHandoffTool(server, {
+    coreNavigationClient: dependencies.coreNavigationClient,
     logger
   });
 
