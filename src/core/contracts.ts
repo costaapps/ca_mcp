@@ -114,7 +114,7 @@ export interface CoreRequestHandoffData {
   Accepted: boolean;
   Destination: string;
   Status: 'REQUESTED';
-  HandoffUUID?: string;
+  HandoffUUID: string;
 }
 
 export interface CoreNavigationError {

@@ -100,7 +100,7 @@ export function registerRequestHandoffTool(
           ExecutionUUID: executionUUID,
           TurnUUID: turnUUID,
           RequestUUID: requestUUIDForLog,
-          ...(handoffUUID === undefined ? {} : { HandoffUUID: handoffUUID })
+          HandoffUUID: handoffUUID
         });
 
         return {

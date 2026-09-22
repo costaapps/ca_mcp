@@ -102,5 +102,5 @@ export const coreRequestHandoffDataSchema = z.object({
   Accepted: z.boolean(),
   Destination: nonEmptyStringSchema,
   Status: z.literal('REQUESTED'),
-  HandoffUUID: nonEmptyStringSchema.optional()
+  HandoffUUID: nonEmptyStringSchema
 }).strict();
