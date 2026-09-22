@@ -7,6 +7,7 @@ import {
   optionalExecutionString,
   requireExecutionId,
   requireExecutionString,
+  requireAgentExecutionContext,
   requireFlowExecutionContext,
   requireResolvedId
 } from '../../src/mcp/context/requireContext.js';
@@ -115,5 +116,32 @@ describe('requireContext', () => {
     }));
 
     expect(() => requireFlowExecutionContext(meta)).toThrow('Execution.ExecutionUUID');
+  });
+
+  it('exige TurnUUID no contexto genérico de Agent sem alterar o contexto de Flow', () => {
+    const meta = extractCAMeta(contextWithMeta({
+      ca: { Execution: {
+        ExecutionUUID: 'execution-1',
+        TurnUUID: 'turn-1',
+        IdCompany: 1003,
+        IdProcessLine: 456
+      } }
+    }));
+
+    expect(requireAgentExecutionContext(meta)).toEqual({
+      ExecutionUUID: 'execution-1',
+      TurnUUID: 'turn-1',
+      IdCompany: 1003,
+      IdProcessLine: 456
+    });
+
+    const missingTurn = extractCAMeta(contextWithMeta({
+      ca: { Execution: {
+        ExecutionUUID: 'execution-1',
+        IdCompany: 1003,
+        IdProcessLine: 456
+      } }
+    }));
+    expect(() => requireAgentExecutionContext(missingTurn)).toThrow('Execution.TurnUUID');
   });
 });

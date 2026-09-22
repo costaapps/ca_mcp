@@ -10,6 +10,7 @@ import type { ProductRepositoryContract } from '../../src/database/repositories/
 import type { PriceListRepositoryContract } from '../../src/database/repositories/priceListRepository.js';
 import type { ItemPriceRepositoryContract } from '../../src/database/repositories/itemPriceRepository.js';
 import type { CoreFlowClientContract } from '../../src/core/contracts.js';
+import type { CoreNavigationClientContract } from '../../src/core/contracts.js';
 import type { McpLogger } from '../../src/mcp/logger.js';
 
 function listen(server: Server): Promise<number> {
@@ -36,6 +37,7 @@ describe('MCP HTTP server', () => {
   let priceListRepository: PriceListRepositoryContract;
   let itemPriceRepository: ItemPriceRepositoryContract;
   let coreFlowClient: CoreFlowClientContract;
+  let coreNavigationClient: CoreNavigationClientContract;
   let logger: McpLogger;
 
   beforeEach(async () => {
@@ -131,6 +133,40 @@ describe('MCP HTTP server', () => {
         }
       })
     };
+    coreNavigationClient = {
+      listNavigationDestinations: vi.fn().mockResolvedValue({
+        Success: true,
+        ExecutionUUID: 'execution-1',
+        Data: {
+          Destinations: [
+            {
+              DestinationRef: 'nav_sales_opaque',
+              Kind: 'MENU',
+              Description: 'Vendas',
+              MenuGroup: 'Atendimento',
+              Keywords: 'comprar catálogo orçamento produto'
+            },
+            {
+              DestinationRef: 'nav_home_opaque',
+              Kind: 'HOME',
+              Description: 'Início',
+              MenuGroup: null,
+              Keywords: null
+            }
+          ]
+        }
+      }),
+      requestHandoff: vi.fn().mockResolvedValue({
+        Success: true,
+        ExecutionUUID: 'execution-1',
+        Data: {
+          Accepted: true,
+          Destination: 'Vendas',
+          Status: 'REQUESTED',
+          HandoffUUID: 'handoff-1'
+        }
+      })
+    };
     logger = {
       toolCompleted: vi.fn(),
       serverError: vi.fn()
@@ -143,6 +179,7 @@ describe('MCP HTTP server', () => {
       priceListRepository,
       itemPriceRepository,
       coreFlowClient,
+      coreNavigationClient,
       logger
     }));
     const port = await listen(server);
@@ -157,7 +194,7 @@ describe('MCP HTTP server', () => {
     await close(server);
   });
 
-  it('inicializa, lista as nove tools e responde health', async () => {
+  it('inicializa, lista as onze tools e responde health', async () => {
     const tools = await client.listTools();
     expect(tools.tools.map((tool) => tool.name)).toEqual([
       'get_chat_history',
@@ -168,7 +205,9 @@ describe('MCP HTTP server', () => {
       'resolve_product',
       'list_flow_actions',
       'describe_flow_action',
-      'execute_flow_action'
+      'execute_flow_action',
+      'list_navigation_destinations',
+      'request_handoff'
     ]);
 
     const health = await fetch(`http://127.0.0.1:${(server.address() as { port: number }).port}/health`);
@@ -586,5 +625,133 @@ describe('MCP HTTP server', () => {
     expect(result.content).toEqual([
       { type: 'text', text: 'A capability já foi executada.' }
     ]);
+  });
+
+  it('integra list_navigation_destinations com MENU/HOME e contexto confiável', async () => {
+    const result = await client.callTool({
+      name: 'list_navigation_destinations',
+      arguments: {},
+      _meta: { ca: { Execution: {
+        ExecutionUUID: 'execution-1',
+        TurnUUID: 'turn-1',
+        IdCompany: 1003,
+        IdProcessLine: 456,
+        IdCompanyMenu: 999
+      } } }
+    });
+
+    expect(result.isError).not.toBe(true);
+    expect(result.structuredContent).toEqual({
+      Destinations: [
+        {
+          DestinationRef: 'nav_sales_opaque',
+          Kind: 'MENU',
+          Description: 'Vendas',
+          MenuGroup: 'Atendimento',
+          Keywords: 'comprar catálogo orçamento produto'
+        },
+        {
+          DestinationRef: 'nav_home_opaque',
+          Kind: 'HOME',
+          Description: 'Início',
+          MenuGroup: null,
+          Keywords: null
+        }
+      ]
+    });
+    expect(coreNavigationClient.listNavigationDestinations).toHaveBeenCalledWith({
+      ExecutionUUID: 'execution-1',
+      IdCompany: 1003,
+      IdProcessLine: 456
+    });
+  });
+
+  it('integra request_handoff, gera RequestUUID e não expõe HandoffUUID', async () => {
+    const result = await client.callTool({
+      name: 'request_handoff',
+      arguments: {
+        DestinationRef: 'nav_sales_opaque',
+        Reason: 'Intenção de compra',
+        Summary: 'Cliente quer comprar memória RAM.'
+      },
+      _meta: { ca: { Execution: {
+        ExecutionUUID: 'execution-1',
+        TurnUUID: 'turn-1',
+        IdCompany: 1003,
+        IdProcessLine: 456
+      } } }
+    });
+
+    expect(result.isError).not.toBe(true);
+    expect(result.structuredContent).toEqual({
+      Accepted: true,
+      Destination: 'Vendas',
+      Status: 'REQUESTED'
+    });
+    expect(result.structuredContent).not.toHaveProperty('HandoffUUID');
+    expect(coreNavigationClient.requestHandoff).toHaveBeenCalledWith({
+      ExecutionUUID: 'execution-1',
+      IdCompany: 1003,
+      IdProcessLine: 456,
+      RequestUUID: expect.any(String),
+      DestinationRef: 'nav_sales_opaque',
+      Reason: 'Intenção de compra',
+      Summary: 'Cliente quer comprar memória RAM.'
+    });
+    expect(logger.toolCompleted).toHaveBeenCalledWith(expect.objectContaining({
+      tool: 'request_handoff',
+      success: true,
+      RequestUUID: expect.any(String),
+      HandoffUUID: 'handoff-1'
+    }));
+  });
+
+  it('propaga erro de destino indisponível e mantém Flow tools operacionais', async () => {
+    vi.mocked(coreNavigationClient.requestHandoff).mockResolvedValueOnce({
+      Success: false,
+      ExecutionUUID: 'execution-1',
+      Data: null,
+      Error: {
+        Code: 'NAVIGATION_DESTINATION_NOT_AVAILABLE',
+        Message: 'O destino não está mais disponível.'
+      }
+    });
+
+    const failedHandoff = await client.callTool({
+      name: 'request_handoff',
+      arguments: {
+        DestinationRef: 'nav_sales_opaque',
+        Reason: 'Navegação',
+        Summary: 'Solicitação.'
+      },
+      _meta: { ca: { Execution: {
+        ExecutionUUID: 'execution-1',
+        TurnUUID: 'turn-1',
+        IdCompany: 1003,
+        IdProcessLine: 456
+      } } }
+    });
+    expect(failedHandoff.isError).toBe(true);
+    expect(failedHandoff.structuredContent).toEqual({
+      Code: 'NAVIGATION_DESTINATION_NOT_AVAILABLE'
+    });
+    expect(failedHandoff.content).toEqual([
+      { type: 'text', text: 'O destino não está mais disponível.' }
+    ]);
+
+    const flowResult = await client.callTool({
+      name: 'list_flow_actions',
+      arguments: {},
+      _meta: { ca: { Execution: {
+        ExecutionUUID: 'execution-1',
+        TurnUUID: 'turn-1',
+        IdCompany: 1003,
+        IdProcessLine: 456
+      } } }
+    });
+    expect(flowResult.isError).not.toBe(true);
+    expect(flowResult.structuredContent).toEqual({
+      Actions: [{ Action: 'get_customer_details', Description: 'Consulta cliente.' }]
+    });
   });
 });
