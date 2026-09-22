@@ -9,6 +9,13 @@ export interface FlowExecutionContext {
   IdProcessLine: number;
 }
 
+export interface AgentExecutionContext {
+  ExecutionUUID: string;
+  TurnUUID: string;
+  IdCompany: number;
+  IdProcessLine: number;
+}
+
 function requirePositiveInteger(value: unknown, path: string): number {
   if (value === undefined || value === null) {
     throw new McpToolError(
@@ -80,6 +87,15 @@ export function requireFlowExecutionContext(meta: CAMeta): FlowExecutionContext 
   return {
     ...context,
     ...(turnUUID === undefined ? {} : { TurnUUID: turnUUID })
+  };
+}
+
+export function requireAgentExecutionContext(meta: CAMeta): AgentExecutionContext {
+  return {
+    ExecutionUUID: requireExecutionString(meta, 'ExecutionUUID'),
+    TurnUUID: requireExecutionString(meta, 'TurnUUID'),
+    IdCompany: requireExecutionId(meta, 'IdCompany'),
+    IdProcessLine: requireExecutionId(meta, 'IdProcessLine')
   };
 }
 
