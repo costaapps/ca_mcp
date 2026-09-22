@@ -5,6 +5,7 @@ import type { CoreNavigationClientContract } from '../../src/core/contracts.js';
 import { listNavigationDestinationsInputSchema } from '../../src/mcp/tools/listNavigationDestinations.js';
 import { registerListNavigationDestinationsTool } from '../../src/mcp/tools/listNavigationDestinations.js';
 import { registerRequestHandoffTool, requestHandoffInputSchema } from '../../src/mcp/tools/requestHandoff.js';
+import { McpToolError } from '../../src/errors/McpToolError.js';
 import type { McpLogger } from '../../src/mcp/logger.js';
 
 function contextWithMeta(meta: unknown): ServerContext {
@@ -147,7 +148,7 @@ describe('Navigation MCP tools', () => {
     expect(listNavigationDestinations).not.toHaveBeenCalled();
   });
 
-  it('request_handoff gera RequestUUID, encaminha apenas contrato permitido e registra HandoffUUID', async () => {
+  it('request_handoff preserva DestinationRef opaco, gera RequestUUID e registra HandoffUUID', async () => {
     const requestHandoff = vi.fn().mockResolvedValue({
       Success: true,
       ExecutionUUID: 'execution-1',
@@ -165,8 +166,9 @@ describe('Navigation MCP tools', () => {
       requestUUID: () => 'request-1'
     }));
 
+    const opaqueDestinationRef = '7fM%2FQ+opaque::A9';
     const result = await callback({
-      DestinationRef: 'nav_opaque/menu%2Fsales',
+      DestinationRef: opaqueDestinationRef,
       Reason: 'Intenção inequívoca de compra',
       Summary: 'Cliente quer comprar memória RAM.'
     }, contextWithMeta(executionMeta));
@@ -183,7 +185,7 @@ describe('Navigation MCP tools', () => {
       IdCompany: 1003,
       IdProcessLine: 456,
       RequestUUID: 'request-1',
-      DestinationRef: 'nav_opaque/menu%2Fsales',
+      DestinationRef: opaqueDestinationRef,
       Reason: 'Intenção inequívoca de compra',
       Summary: 'Cliente quer comprar memória RAM.'
     });
@@ -193,6 +195,28 @@ describe('Navigation MCP tools', () => {
       RequestUUID: 'request-1',
       HandoffUUID: 'handoff-1'
     }));
+  });
+
+  it('request_handoff não repete uma escrita após timeout e reutilizaria o mesmo UUID em retry futuro', async () => {
+    const requestHandoff = vi.fn().mockRejectedValue(
+      new McpToolError('CORE_TIMEOUT', 'O Core excedeu o tempo limite para responder.')
+    );
+    const callback = captureCallback((server) => registerRequestHandoffTool(server, {
+      coreNavigationClient: coreClient({ requestHandoff }),
+      logger: logger(),
+      requestUUID: () => 'request-1'
+    }));
+
+    const result = await callback({
+      DestinationRef: 'random-opaque-reference',
+      Reason: 'Navegação',
+      Summary: 'Solicitação.'
+    }, contextWithMeta(executionMeta));
+
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toEqual({ Code: 'CORE_TIMEOUT' });
+    expect(requestHandoff).toHaveBeenCalledTimes(1);
+    expect(requestHandoff.mock.calls[0]?.[0]).toMatchObject({ RequestUUID: 'request-1' });
   });
 
   it('request_handoff exige DestinationRef e não aceita IDs técnicos como roteamento', async () => {
@@ -290,12 +314,20 @@ describe('Navigation MCP tools', () => {
   });
 
   it('não expõe IDs técnicos na entrada da listagem', () => {
-    expect(listNavigationDestinationsInputSchema.safeParse({ IdCompanyMenu: 1 }).success).toBe(false);
-    expect(requestHandoffInputSchema.safeParse({
-      DestinationRef: 'nav_opaque',
-      Reason: 'Navegação',
-      Summary: 'Solicitação.',
-      IdCompanyModule: 2
-    }).success).toBe(false);
+    for (const technicalId of [
+      'IdCompany',
+      'IdProcessLine',
+      'TurnUUID',
+      'IdCompanyMenu',
+      'IdCompanyModule'
+    ]) {
+      expect(listNavigationDestinationsInputSchema.safeParse({ [technicalId]: 1 }).success).toBe(false);
+      expect(requestHandoffInputSchema.safeParse({
+        DestinationRef: 'random-opaque-reference',
+        Reason: 'Navegação',
+        Summary: 'Solicitação.',
+        [technicalId]: 1
+      }).success).toBe(false);
+    }
   });
 });

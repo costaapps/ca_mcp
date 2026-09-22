@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { CoreNavigationClient } from '../../src/core/CoreNavigationClient.js';
+import { canonicalRequestHandoffSuccess } from '../fixtures/coreNavigationContracts.js';
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -53,15 +54,7 @@ describe('CoreNavigationClient', () => {
 
   it('envia request_handoff com RequestUUID e contrato sem IDs técnicos', async () => {
     const fetchFn = fetchMock();
-    fetchFn.mockResolvedValueOnce(jsonResponse({
-      ...successEnvelope,
-      Data: {
-        Accepted: true,
-        Destination: 'Vendas',
-        Status: 'REQUESTED',
-        HandoffUUID: 'handoff-1'
-      }
-    }));
+    fetchFn.mockResolvedValueOnce(jsonResponse(canonicalRequestHandoffSuccess));
     const client = new CoreNavigationClient({
       baseUrl: 'http://core.internal',
       timeoutMs: 1000,
@@ -75,15 +68,7 @@ describe('CoreNavigationClient', () => {
       Summary: 'Cliente deseja consultar memória RAM.'
     };
 
-    await expect(client.requestHandoff(request)).resolves.toMatchObject({
-      Success: true,
-      Data: {
-        Accepted: true,
-        Destination: 'Vendas',
-        Status: 'REQUESTED',
-        HandoffUUID: 'handoff-1'
-      }
-    });
+    await expect(client.requestHandoff(request)).resolves.toEqual(canonicalRequestHandoffSuccess);
     expect(fetchFn.mock.calls[0]?.[0]).toBe(
       'http://core.internal/v1/agent-platform/navigation/handoffs/request'
     );
@@ -197,9 +182,42 @@ describe('CoreNavigationClient', () => {
     });
   });
 
-  it('não faz retry automático de request_handoff', async () => {
+  it('converte JSON inválido e envelope inválido em erro de contrato', async () => {
+    const invalidJsonFetch = fetchMock();
+    invalidJsonFetch.mockResolvedValueOnce({
+      json: () => Promise.reject(new SyntaxError('JSON inválido'))
+    } as Response);
+    const invalidJsonClient = new CoreNavigationClient({
+      baseUrl: 'http://core.internal',
+      timeoutMs: 1000,
+      fetchFn: invalidJsonFetch
+    });
+
+    await expect(invalidJsonClient.listNavigationDestinations(context)).rejects.toMatchObject({
+      code: 'CORE_CONTRACT_ERROR'
+    });
+
+    const invalidEnvelopeFetch = fetchMock();
+    invalidEnvelopeFetch.mockResolvedValueOnce(jsonResponse({
+      Success: true,
+      Data: { Destinations: [] }
+    }));
+    const invalidEnvelopeClient = new CoreNavigationClient({
+      baseUrl: 'http://core.internal',
+      timeoutMs: 1000,
+      fetchFn: invalidEnvelopeFetch
+    });
+
+    await expect(invalidEnvelopeClient.listNavigationDestinations(context)).rejects.toMatchObject({
+      code: 'CORE_CONTRACT_ERROR'
+    });
+  });
+
+  it('rejeita o contrato canônico de handoff quando Destination desaparece', async () => {
     const fetchFn = fetchMock();
-    fetchFn.mockRejectedValue(new Error('timeout after write'));
+    const invalidResponse = structuredClone(canonicalRequestHandoffSuccess);
+    delete (invalidResponse.Data as { Destination?: string }).Destination;
+    fetchFn.mockResolvedValueOnce(jsonResponse(invalidResponse));
     const client = new CoreNavigationClient({
       baseUrl: 'http://core.internal',
       timeoutMs: 1000,
@@ -209,10 +227,50 @@ describe('CoreNavigationClient', () => {
     await expect(client.requestHandoff({
       ...context,
       RequestUUID: 'request-1',
+      DestinationRef: 'random-opaque-reference',
+      Reason: 'Navegação',
+      Summary: 'Solicitação de handoff.'
+    })).rejects.toMatchObject({ code: 'CORE_CONTRACT_ERROR' });
+  });
+
+  it('rejeita resposta de handoff sem HandoffUUID interno', async () => {
+    const fetchFn = fetchMock();
+    const invalidResponse = structuredClone(canonicalRequestHandoffSuccess);
+    delete (invalidResponse.Data as { HandoffUUID?: string }).HandoffUUID;
+    fetchFn.mockResolvedValueOnce(jsonResponse(invalidResponse));
+    const client = new CoreNavigationClient({
+      baseUrl: 'http://core.internal',
+      timeoutMs: 1000,
+      fetchFn
+    });
+
+    await expect(client.requestHandoff({
+      ...context,
+      RequestUUID: 'request-1',
+      DestinationRef: 'random-opaque-reference',
+      Reason: 'Navegação',
+      Summary: 'Solicitação de handoff.'
+    })).rejects.toMatchObject({ code: 'CORE_CONTRACT_ERROR' });
+  });
+
+  it('não faz retry automático de request_handoff', async () => {
+    const fetchFn = fetchMock();
+    fetchFn.mockImplementationOnce((_url: string, init?: RequestInit) => new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(new Error('timeout after write')));
+    }));
+    const client = new CoreNavigationClient({
+      baseUrl: 'http://core.internal',
+      timeoutMs: 5,
+      fetchFn
+    });
+
+    await expect(client.requestHandoff({
+      ...context,
+      RequestUUID: 'request-1',
       DestinationRef: 'nav_opaque',
       Reason: 'Navegação',
       Summary: 'Solicitação de handoff.'
-    })).rejects.toMatchObject({ code: 'CORE_UNAVAILABLE' });
+    })).rejects.toMatchObject({ code: 'CORE_TIMEOUT' });
     expect(fetchFn).toHaveBeenCalledTimes(1);
   });
 });

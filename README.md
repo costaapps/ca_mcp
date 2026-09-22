@@ -71,7 +71,11 @@ Em uma execução bem-sucedida, `InvocationUUID`, `IdFlow` e `IdProcessLineFlow`
 
 `request_handoff` gera um `RequestUUID` novo no MCP e encaminha a solicitação ao Core. O MCP não escolhe, valida semanticamente ou aplica o destino; o Core é responsável por autorizar e persistir o Handoff. Um eventual `HandoffUUID` é usado apenas em observabilidade e não é exibido ao Agent.
 
-As duas tools usam os endpoints `/v1/agent-platform/navigation/destinations/list` e `/v1/agent-platform/navigation/handoffs/request`, sem retry automático. Elas reutilizam `CORE_API_URL` e `CORE_API_TIMEOUT_MS`; não há novas variáveis de ambiente.
+## Integração real opcional
+
+A suíte padrão não depende de um Core disponível. Para executar a validação real dos dois endpoints de Navigation, habilite explicitamente o teste com `CORE_NAVIGATION_INTEGRATION=1` e forneça `CORE_API_URL`, `CORE_NAVIGATION_EXECUTION_UUID`, `CORE_NAVIGATION_TURN_UUID`, `CORE_NAVIGATION_ID_COMPANY`, `CORE_NAVIGATION_ID_PROCESS_LINE` e um `CORE_NAVIGATION_DESTINATION_REF` listado para o contexto. `CORE_NAVIGATION_TIMEOUT_MS`, `CORE_NAVIGATION_REASON` e `CORE_NAVIGATION_SUMMARY` são opcionais. O teste usa uma nova `RequestUUID` e pode criar uma solicitação de handoff no Core configurado; por isso, deve ser executado somente contra um contexto de homologação autorizado.
+
+As duas tools usam os endpoints `/v1/agent-platform/navigation/destinations/list` e `/v1/agent-platform/navigation/handoffs/request`, sem retry automático. Em runtime, elas reutilizam `CORE_API_URL` e `CORE_API_TIMEOUT_MS`; as variáveis `CORE_NAVIGATION_*` acima são exclusivas do teste opt-in.
 
 ## Structured content
 
