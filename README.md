@@ -67,7 +67,7 @@ Em uma execução bem-sucedida, `InvocationUUID`, `IdFlow` e `IdProcessLineFlow`
 
 ## Navigation / Handoff
 
-`list_navigation_destinations` chama o endpoint interno de destinos do Core e retorna somente `DestinationRef`, `Kind` (`MENU` ou `HOME`), descrição, grupo e palavras-chave. A tool não consulta `CompanyMenu` nem expõe `IdCompanyMenu`, `IdCompanyModule`, `IdModule` ou `Module.Object`.
+`list_navigation_destinations` chama o endpoint interno de destinos do Core e retorna `DestinationRef`, `Kind` (`MENU` ou `HOME`), descrição, grupo, palavras-chave e `AIReference` quando fornecido pelo Core. `AIReference` é dado descritivo opcional (também pode ser `null`): o MCP apenas valida e transporta seu texto, sem interpretá-lo ou registrá-lo em logs. A tool não consulta `CompanyMenu` nem expõe `IdCompanyMenu`, `IdCompanyModule`, `IdModule` ou `Module.Object`.
 
 `request_handoff` gera um `RequestUUID` novo no MCP e encaminha a solicitação ao Core. O MCP não escolhe, valida semanticamente ou aplica o destino; o Core é responsável por autorizar e persistir o Handoff. Um eventual `HandoffUUID` é usado apenas em observabilidade e não é exibido ao Agent.
 

@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { CoreNavigationClient } from '../../src/core/CoreNavigationClient.js';
-import { canonicalRequestHandoffSuccess } from '../fixtures/coreNavigationContracts.js';
+import {
+  canonicalRequestHandoffSuccess,
+  navigationDestinationsWithAIReference
+} from '../fixtures/coreNavigationContracts.js';
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -51,6 +54,61 @@ describe('CoreNavigationClient', () => {
       })
     );
   });
+
+  it('aceita Core antigo sem AIReference e preserva texto ou null em MENU/HOME', async () => {
+    const legacyDestination = {
+      DestinationRef: 'opaque-legacy',
+      Kind: 'MENU',
+      Description: 'Vendas',
+      MenuGroup: null,
+      Keywords: null
+    };
+    const fetchFn = fetchMock();
+    fetchFn.mockResolvedValueOnce(jsonResponse({
+      ...successEnvelope,
+      Data: { Destinations: [legacyDestination] }
+    }));
+    fetchFn.mockResolvedValueOnce(jsonResponse(navigationDestinationsWithAIReference));
+    const client = new CoreNavigationClient({
+      baseUrl: 'http://core.internal',
+      timeoutMs: 1000,
+      fetchFn
+    });
+
+    await expect(client.listNavigationDestinations(context)).resolves.toEqual({
+      ...successEnvelope,
+      Data: { Destinations: [legacyDestination] }
+    });
+    await expect(client.listNavigationDestinations(context)).resolves.toEqual(
+      navigationDestinationsWithAIReference
+    );
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(['IdCompanyModule', 'IdCompanyMenu'])(
+    'rejeita %s mesmo quando AIReference é válido',
+    async (technicalId) => {
+      const fetchFn = fetchMock();
+      fetchFn.mockResolvedValueOnce(jsonResponse({
+        ...successEnvelope,
+        Data: {
+          Destinations: [{
+            ...navigationDestinationsWithAIReference.Data.Destinations[0],
+            [technicalId]: 123
+          }]
+        }
+      }));
+      const client = new CoreNavigationClient({
+        baseUrl: 'http://core.internal',
+        timeoutMs: 1000,
+        fetchFn
+      });
+
+      await expect(client.listNavigationDestinations(context)).rejects.toMatchObject({
+        code: 'CORE_CONTRACT_ERROR'
+      });
+    }
+  );
 
   it('envia request_handoff com RequestUUID e contrato sem IDs técnicos', async () => {
     const fetchFn = fetchMock();
