@@ -62,3 +62,45 @@ export const coreExecuteFlowActionDataSchema = z.object({
     IdProcessLineFlow: z.number().int()
   }).passthrough()
 }).passthrough();
+
+const coreNavigationErrorSchema = z.object({
+  Code: nonEmptyStringSchema,
+  Message: nonEmptyStringSchema
+}).passthrough();
+
+const coreNavigationSuccessSchema = z.object({
+  Success: z.literal(true),
+  ExecutionUUID: nonEmptyStringSchema,
+  Data: z.unknown()
+}).passthrough();
+
+const coreNavigationFailureSchema = z.object({
+  Success: z.literal(false),
+  ExecutionUUID: nonEmptyStringSchema,
+  Data: z.null(),
+  Error: coreNavigationErrorSchema
+}).passthrough();
+
+export const coreNavigationResponseSchema = z.union([
+  coreNavigationSuccessSchema,
+  coreNavigationFailureSchema
+]);
+
+export const navigationDestinationSchema = z.object({
+  DestinationRef: nonEmptyStringSchema,
+  Kind: z.enum(['MENU', 'HOME']),
+  Description: z.string(),
+  MenuGroup: z.string().nullable(),
+  Keywords: z.string().nullable()
+}).strict();
+
+export const coreListNavigationDestinationsDataSchema = z.object({
+  Destinations: z.array(navigationDestinationSchema)
+}).strict();
+
+export const coreRequestHandoffDataSchema = z.object({
+  Accepted: z.literal(true),
+  Destination: nonEmptyStringSchema,
+  Status: z.literal('REQUESTED'),
+  HandoffUUID: nonEmptyStringSchema
+}).strict();

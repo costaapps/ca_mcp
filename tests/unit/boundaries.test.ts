@@ -66,4 +66,26 @@ describe('PoC MCP boundaries', () => {
     expect(server).toContain('registerDescribeFlowActionTool');
     expect(server).toContain('registerExecuteFlowActionTool');
   });
+
+  it('mantém as Navigation tools atrás do CoreNavigationClient e sem IDs técnicos', () => {
+    const navigationTools = [
+      'listNavigationDestinations.ts',
+      'requestHandoff.ts'
+    ].map((file) => readFileSync(
+      resolve(process.cwd(), 'src/mcp/tools', file),
+      'utf8'
+    )).join('\n');
+    const server = readFileSync(resolve(process.cwd(), 'src/mcp/server.ts'), 'utf8');
+
+    expect(navigationTools).toContain('CoreNavigationClientContract');
+    expect(navigationTools).not.toMatch(/database\/|Repository|CompanyMenu|ProcessLine/);
+    expect(navigationTools).not.toContain('fetch(');
+    expect(readFileSync(resolve(process.cwd(), 'src/core/CoreNavigationClient.ts'), 'utf8')).toContain('fetchFn');
+    expect(server).toContain('coreNavigationClient: CoreNavigationClientContract');
+    expect(server).toContain('registerListNavigationDestinationsTool');
+    expect(server).toContain('registerRequestHandoffTool');
+    expect(navigationTools).not.toContain('IdCompanyMenu');
+    expect(navigationTools).not.toContain('IdCompanyModule');
+    expect(navigationTools).not.toContain('IdModule');
+  });
 });

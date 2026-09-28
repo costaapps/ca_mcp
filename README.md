@@ -11,6 +11,8 @@ MCP Server da PoC AIDocument da Costa Apps. O serviço mantém as seis tools de 
 - `list_flow_actions`
 - `describe_flow_action`
 - `execute_flow_action`
+- `list_navigation_destinations`
+- `request_handoff`
 
 ## Requisitos
 
@@ -49,6 +51,8 @@ As tools não recebem IDs técnicos em `arguments`. O Agent Runtime envia soment
 
 As Flow tools exigem, exclusivamente em `_meta.ca.Execution`, `ExecutionUUID`, `IdCompany` e `IdProcessLine`. `TurnUUID` é opcional e serve para correlação. IDs técnicos não fazem parte dos argumentos funcionais.
 
+As Navigation tools exigem, exclusivamente em `_meta.ca.Execution`, `ExecutionUUID`, `TurnUUID`, `IdCompany` e `IdProcessLine`. `list_navigation_destinations` recebe `{}`. `request_handoff` recebe apenas `DestinationRef`, `Reason` e `Summary`; `DestinationRef` é opaco e não pode ser substituído por IDs técnicos.
+
 ## Flow tools
 
 `list_flow_actions` recebe `{}` e lista as capabilities disponíveis no AIDocument.
@@ -60,6 +64,18 @@ As Flow tools exigem, exclusivamente em `_meta.ca.Execution`, `ExecutionUUID`, `
 As três tools usam `CORE_API_URL` e `CORE_API_TIMEOUT_MS` para acessar os endpoints internos `/v1/ai-document/flow-actions/*`. Não consultam `Flow`/`ProcessLineFlow` no banco, não interpretam `ObjectType`, não resolvem `$CA_Input`, não aplicam `Repeatable` e não mantêm cache ou estado conversacional.
 
 Em uma execução bem-sucedida, `InvocationUUID`, `IdFlow` e `IdProcessLineFlow` ficam somente em `_meta.ca.FlowInvocation`. Em uma falha de execução, o MCP retorna `isError=true` e o envelope funcional com `Success`, `Action`, `Output` e `Error`.
+
+## Navigation / Handoff
+
+`list_navigation_destinations` chama o endpoint interno de destinos do Core e retorna somente `DestinationRef`, `Kind` (`MENU` ou `HOME`), descrição, grupo e palavras-chave. A tool não consulta `CompanyMenu` nem expõe `IdCompanyMenu`, `IdCompanyModule`, `IdModule` ou `Module.Object`.
+
+`request_handoff` gera um `RequestUUID` novo no MCP e encaminha a solicitação ao Core. O MCP não escolhe, valida semanticamente ou aplica o destino; o Core é responsável por autorizar e persistir o Handoff. Um eventual `HandoffUUID` é usado apenas em observabilidade e não é exibido ao Agent.
+
+## Integração real opcional
+
+A suíte padrão não depende de um Core disponível. Para executar a validação real dos dois endpoints de Navigation, habilite explicitamente o teste com `CORE_NAVIGATION_INTEGRATION=1` e forneça `CORE_API_URL`, `CORE_NAVIGATION_EXECUTION_UUID`, `CORE_NAVIGATION_TURN_UUID`, `CORE_NAVIGATION_ID_COMPANY` e `CORE_NAVIGATION_ID_PROCESS_LINE`. O teste usa um `DestinationRef` retornado pela listagem do Core; `CORE_NAVIGATION_DESTINATION_REF` é opcional para selecionar um destino específico dessa lista. `CORE_NAVIGATION_TIMEOUT_MS`, `CORE_NAVIGATION_REASON` e `CORE_NAVIGATION_SUMMARY` também são opcionais. O teste usa uma nova `RequestUUID` e pode criar uma solicitação de handoff no Core configurado; por isso, deve ser executado somente contra um contexto de homologação autorizado.
+
+As duas tools usam os endpoints `/v1/agent-platform/navigation/destinations/list` e `/v1/agent-platform/navigation/handoffs/request`, sem retry automático. Em runtime, elas reutilizam `CORE_API_URL` e `CORE_API_TIMEOUT_MS`; as variáveis `CORE_NAVIGATION_*` acima são exclusivas do teste opt-in.
 
 ## Structured content
 

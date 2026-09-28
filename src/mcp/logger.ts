@@ -7,6 +7,7 @@ export interface ToolLogEvent {
   TurnUUID?: string;
   RequestUUID?: string;
   InvocationUUID?: string;
+  HandoffUUID?: string;
 }
 
 export interface McpLogger {

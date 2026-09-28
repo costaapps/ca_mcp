@@ -82,3 +82,68 @@ export interface CoreFlowClientContract {
     request: CoreExecuteFlowActionRequest
   ): Promise<CoreFlowResponse<CoreExecuteFlowActionData>>;
 }
+
+export interface CoreNavigationContextRequest {
+  ExecutionUUID: string;
+  IdCompany: number;
+  IdProcessLine: number;
+}
+
+export type CoreListNavigationDestinationsRequest = CoreNavigationContextRequest;
+
+export interface NavigationDestination {
+  DestinationRef: string;
+  Kind: 'MENU' | 'HOME';
+  Description: string;
+  MenuGroup: string | null;
+  Keywords: string | null;
+}
+
+export interface CoreListNavigationDestinationsData {
+  Destinations: NavigationDestination[];
+}
+
+export interface CoreRequestHandoffRequest extends CoreNavigationContextRequest {
+  RequestUUID: string;
+  DestinationRef: string;
+  Reason: string;
+  Summary: string;
+}
+
+export interface CoreRequestHandoffData {
+  Accepted: true;
+  Destination: string;
+  Status: 'REQUESTED';
+  HandoffUUID: string;
+}
+
+export interface CoreNavigationError {
+  Code: string;
+  Message: string;
+}
+
+export interface CoreNavigationSuccess<TData> {
+  Success: true;
+  ExecutionUUID: string;
+  Data: TData;
+}
+
+export interface CoreNavigationFailure {
+  Success: false;
+  ExecutionUUID: string;
+  Data: null;
+  Error: CoreNavigationError;
+}
+
+export type CoreNavigationResponse<TData> =
+  | CoreNavigationSuccess<TData>
+  | CoreNavigationFailure;
+
+export interface CoreNavigationClientContract {
+  listNavigationDestinations(
+    request: CoreListNavigationDestinationsRequest
+  ): Promise<CoreNavigationResponse<CoreListNavigationDestinationsData>>;
+  requestHandoff(
+    request: CoreRequestHandoffRequest
+  ): Promise<CoreNavigationResponse<CoreRequestHandoffData>>;
+}
