@@ -91,7 +91,8 @@ export const navigationDestinationSchema = z.object({
   Kind: z.enum(['MENU', 'HOME']),
   Description: z.string(),
   MenuGroup: z.string().nullable(),
-  Keywords: z.string().nullable()
+  Keywords: z.string().nullable(),
+  AIReference: z.string().nullable().optional()
 }).strict();
 
 export const coreListNavigationDestinationsDataSchema = z.object({

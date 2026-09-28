@@ -97,6 +97,7 @@ export interface NavigationDestination {
   Description: string;
   MenuGroup: string | null;
   Keywords: string | null;
+  AIReference?: string | null;
 }
 
 export interface CoreListNavigationDestinationsData {

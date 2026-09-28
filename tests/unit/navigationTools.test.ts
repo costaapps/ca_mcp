@@ -7,6 +7,7 @@ import { registerListNavigationDestinationsTool } from '../../src/mcp/tools/list
 import { registerRequestHandoffTool, requestHandoffInputSchema } from '../../src/mcp/tools/requestHandoff.js';
 import { McpToolError } from '../../src/errors/McpToolError.js';
 import type { McpLogger } from '../../src/mcp/logger.js';
+import { navigationDestinationsWithAIReference } from '../fixtures/coreNavigationContracts.js';
 
 function contextWithMeta(meta: unknown): ServerContext {
   return {
@@ -126,6 +127,37 @@ describe('Navigation MCP tools', () => {
     });
     await expect(callback({}, contextWithMeta(executionMeta))).resolves.toMatchObject({
       structuredContent: { Destinations: [] }
+    });
+  });
+
+  it('transporta AIReference por destino sem interpretar ou registrar o texto', async () => {
+    const listNavigationDestinations = vi.fn().mockResolvedValue(
+      navigationDestinationsWithAIReference
+    );
+    const log = logger();
+    const callback = captureCallback((server) => registerListNavigationDestinationsTool(server, {
+      coreNavigationClient: coreClient({ listNavigationDestinations }),
+      logger: log
+    }));
+
+    const result = await callback({}, contextWithMeta(executionMeta));
+
+    expect(result.isError).not.toBe(true);
+    expect(result.structuredContent).toEqual(navigationDestinationsWithAIReference.Data);
+    expect(result.content).toEqual([{
+      type: 'text',
+      text: 'Destinos de navegação listados com sucesso.'
+    }]);
+    expect(JSON.stringify(vi.mocked(log.toolCompleted).mock.calls)).not.toContain(
+      'Consulta produtos ativos no ERP'
+    );
+    expect(JSON.stringify(vi.mocked(log.toolCompleted).mock.calls)).not.toContain(
+      'Acompanha o estado dos pedidos'
+    );
+    expect(listNavigationDestinations).toHaveBeenCalledWith({
+      ExecutionUUID: 'execution-1',
+      IdCompany: 1003,
+      IdProcessLine: 456
     });
   });
 
@@ -357,5 +389,11 @@ describe('Navigation MCP tools', () => {
         [technicalId]: 1
       }).success).toBe(false);
     }
+    expect(requestHandoffInputSchema.safeParse({
+      DestinationRef: 'random-opaque-reference',
+      Reason: 'Navegação',
+      Summary: 'Solicitação.',
+      AIReference: 'Não pertence ao request_handoff.'
+    }).success).toBe(false);
   });
 });
