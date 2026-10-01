@@ -16,6 +16,7 @@ export const describeFlowActionInputSchema = z.object({
 export const describeFlowActionOutputSchema = z.object({
   Action: z.string(),
   Description: z.string(),
+  ObjectDescription: z.string().nullable().optional(),
   Repeatable: z.boolean(),
   Effect: z.enum(['READ', 'WRITE', 'EXTERNAL_READ', 'EXTERNAL_WRITE', 'OUTPUT', 'CONTROL']),
   Available: z.boolean(),

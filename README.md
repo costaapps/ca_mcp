@@ -57,7 +57,7 @@ As Navigation tools exigem, exclusivamente em `_meta.ca.Execution`, `ExecutionUU
 
 `list_flow_actions` recebe `{}` e lista somente `Action` e `Description` das capabilities disponíveis no AIDocument. Configuração técnica retornada pelo Core não é exposta ao Agent.
 
-`describe_flow_action` recebe apenas `{ "Action": "..." }` e retorna descrição, disponibilidade, repetição, `Effect` (`READ`, `WRITE`, `EXTERNAL_READ`, `EXTERNAL_WRITE`, `OUTPUT` ou `CONTROL`) e `RequiredInputs`.
+`describe_flow_action` recebe apenas `{ "Action": "..." }` e retorna descrição, disponibilidade, repetição, `Effect` (`READ`, `WRITE`, `EXTERNAL_READ`, `EXTERNAL_WRITE`, `OUTPUT` ou `CONTROL`) e `RequiredInputs`. Também propaga `ObjectDescription` quando fornecido pelo Core: texto sem transformação ou `null`. O campo é opcional para manter capabilities e respostas anteriores sem essa orientação válidas; sua ausência é preservada. O MCP não interpreta essa orientação semântica, não a converte em `RequiredInputs` ou schema de entrada e não implementa a resolução de PROMPT.
 
 `execute_flow_action` recebe `{ "Action": "...", "Input": {} }`. O MCP cria um novo `RequestUUID` para cada intenção, chama o Core sem retry automático e preserva o `Output` sem transformação. A resposta funcional de sucesso inclui `Success=true`, `Action`, `Status` (`COMPLETED` ou `NEEDS_INPUT`), `MissingInformation` e `Output`. `Status=NEEDS_INPUT` é uma conclusão válida da invocation e não gera `isError`; uma nova intenção do Agent pode gerar uma nova invocation. Falhas usam exclusivamente o envelope `Success=false`, `Action`, `Output=null` e `Error` com `Code` e `Message`, junto de `isError=true`.
 

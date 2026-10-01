@@ -32,6 +32,7 @@ export interface CoreListFlowActionsData {
 export interface CoreDescribeFlowActionData {
   Action: string;
   Description: string;
+  ObjectDescription?: string | null;
   Repeatable: boolean;
   Effect: 'READ' | 'WRITE' | 'EXTERNAL_READ' | 'EXTERNAL_WRITE' | 'OUTPUT' | 'CONTROL';
   Available: boolean;

@@ -44,11 +44,15 @@ describe('ponte HTTP MCP → Core para capabilities Agentic', () => {
           return;
         }
         if (request.url?.endsWith('/describe')) {
+          const description = body.Action === 'set_delivery_date'
+            ? { ObjectDescription: 'Resposta deve estar toda em maiúsculo' }
+            : body.Action === 'set_carrier' ? { ObjectDescription: null } : {};
           respond(response, {
             Action: body.Action, Description: 'Capability de teste.', Repeatable: true,
             Effect: body.Action === 'find_customer' ? 'READ' : 'WRITE',
             Available: true, ExecutionCount: 0, UnavailableReason: null,
             RequiredInputs: body.Action === 'find_customer' ? [] : ['Value'],
+            ...description,
             ObjectType: 'CFL'
           });
           return;
@@ -111,6 +115,13 @@ describe('ponte HTTP MCP → Core para capabilities Agentic', () => {
       expect(tools.tools.map((tool) => tool.name)).toEqual(expect.arrayContaining([
         'list_flow_actions', 'describe_flow_action', 'execute_flow_action'
       ]));
+      expect(tools.tools).toHaveLength(11);
+      const describeTool = tools.tools.find((tool) => tool.name === 'describe_flow_action');
+      expect(describeTool?.outputSchema?.properties).toHaveProperty('ObjectDescription');
+      expect(describeTool?.outputSchema?.required).not.toContain('ObjectDescription');
+      expect(describeTool?.inputSchema.properties).toEqual({
+        Action: expect.any(Object)
+      });
 
       const _meta = { ca: { Execution: {
         ExecutionUUID: 'execution-1', TurnUUID: 'turn-1', IdCompany: 1003, IdProcessLine: 456
@@ -125,8 +136,18 @@ describe('ponte HTTP MCP → Core para capabilities Agentic', () => {
       for (const action of ['find_customer', 'set_delivery_date', 'set_carrier']) {
         const describe = await client.callTool({ name: 'describe_flow_action', arguments: { Action: action }, _meta });
         expect(describe.isError).not.toBe(true);
-        expect(describe.structuredContent).toMatchObject({ Action: action, Effect: action === 'find_customer' ? 'READ' : 'WRITE' });
-        expect(describe.structuredContent).not.toHaveProperty('ObjectType');
+        expect(describe.structuredContent).toEqual({
+          Action: action, Description: 'Capability de teste.', Repeatable: true,
+          Effect: action === 'find_customer' ? 'READ' : 'WRITE',
+          Available: true, ExecutionCount: 0, UnavailableReason: null,
+          RequiredInputs: action === 'find_customer' ? [] : ['Value'],
+          ...(action === 'set_delivery_date'
+            ? { ObjectDescription: 'Resposta deve estar toda em maiúsculo' }
+            : action === 'set_carrier' ? { ObjectDescription: null } : {})
+        });
+        if (action === 'find_customer') {
+          expect(describe.structuredContent).not.toHaveProperty('ObjectDescription');
+        }
       }
 
       for (const [action, input] of [
