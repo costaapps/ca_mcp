@@ -20,6 +20,8 @@ export const executeFlowActionInputSchema = z.object({
 const executeFlowActionSuccessSchema = z.object({
   Success: z.literal(true),
   Action: z.string(),
+  Status: z.enum(['COMPLETED', 'NEEDS_INPUT', 'FAILED']),
+  MissingInformation: z.array(z.string()),
   Output: jsonValueSchema
 });
 
@@ -75,7 +77,7 @@ export function registerExecuteFlowActionTool(
   server.registerTool(
     TOOL_NAME,
     {
-      description: 'Executa uma capability do AIDocument atual. Use apenas uma Action descoberta e descrita. O Core revalida disponibilidade e lifecycle no momento da execução.',
+      description: 'Executa uma capability previamente descoberta e descrita. O resultado pode ser COMPLETED ou NEEDS_INPUT, que solicita informação adicional e não é erro MCP. O Core revalida disponibilidade e lifecycle.',
       inputSchema: executeFlowActionInputSchema,
       outputSchema: executeFlowActionOutputSchema
     },
@@ -122,10 +124,17 @@ export function registerExecuteFlowActionTool(
         }
 
         const result: CallToolResult = {
-          content: [{ type: 'text', text: 'Capability de Flow executada com sucesso.' }],
+          ...(response.Data.Status === 'FAILED' ? { isError: true } : {}),
+          content: [{ type: 'text', text: response.Data.Status === 'NEEDS_INPUT'
+            ? 'A capability precisa de informação adicional.'
+            : response.Data.Status === 'FAILED'
+              ? 'A capability não foi concluída.'
+              : 'Capability de Flow executada com sucesso.' }],
           structuredContent: {
             Success: true,
             Action: response.Data.Action,
+            Status: response.Data.Status,
+            MissingInformation: response.Data.MissingInformation,
             Output: response.Data.Output
           }
         };
@@ -134,7 +143,7 @@ export function registerExecuteFlowActionTool(
         dependencies.logger.toolCompleted({
           tool: TOOL_NAME,
           durationMs: Date.now() - startedAt,
-          success: true,
+          success: response.Data.Status !== 'FAILED',
           ExecutionUUID: executionUUID,
           TurnUUID: turnUUID,
           RequestUUID: requestUUIDForLog,

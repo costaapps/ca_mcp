@@ -33,6 +33,7 @@ export interface CoreDescribeFlowActionData {
   Action: string;
   Description: string;
   Repeatable: boolean;
+  Effect: 'READ' | 'WRITE' | 'EXTERNAL_READ' | 'EXTERNAL_WRITE' | 'OUTPUT' | 'CONTROL';
   Available: boolean;
   ExecutionCount: number;
   UnavailableReason: string | null;
@@ -47,6 +48,8 @@ export interface CoreFlowInvocation {
 
 export interface CoreExecuteFlowActionData {
   Action: string;
+  Status: 'COMPLETED' | 'NEEDS_INPUT' | 'FAILED';
+  MissingInformation: string[];
   Output: JsonValue;
   Invocation: CoreFlowInvocation;
 }

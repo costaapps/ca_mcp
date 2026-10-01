@@ -47,6 +47,7 @@ export const coreDescribeFlowActionDataSchema = z.object({
   Action: nonEmptyStringSchema,
   Description: z.string(),
   Repeatable: z.boolean(),
+  Effect: z.enum(['READ', 'WRITE', 'EXTERNAL_READ', 'EXTERNAL_WRITE', 'OUTPUT', 'CONTROL']),
   Available: z.boolean(),
   ExecutionCount: z.number().int().nonnegative(),
   UnavailableReason: z.string().nullable(),
@@ -55,6 +56,8 @@ export const coreDescribeFlowActionDataSchema = z.object({
 
 export const coreExecuteFlowActionDataSchema = z.object({
   Action: nonEmptyStringSchema,
+  Status: z.enum(['COMPLETED', 'NEEDS_INPUT', 'FAILED']),
+  MissingInformation: z.array(nonEmptyStringSchema),
   Output: jsonValueSchema,
   Invocation: z.object({
     InvocationUUID: nonEmptyStringSchema,
