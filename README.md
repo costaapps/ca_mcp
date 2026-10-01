@@ -55,15 +55,17 @@ As Navigation tools exigem, exclusivamente em `_meta.ca.Execution`, `ExecutionUU
 
 ## Flow tools
 
-`list_flow_actions` recebe `{}` e lista as capabilities disponíveis no AIDocument.
+`list_flow_actions` recebe `{}` e lista somente `Action` e `Description` das capabilities disponíveis no AIDocument. Configuração técnica retornada pelo Core não é exposta ao Agent.
 
-`describe_flow_action` recebe apenas `{ "Action": "..." }` e retorna descrição, disponibilidade, repetição e `RequiredInputs`.
+`describe_flow_action` recebe apenas `{ "Action": "..." }` e retorna descrição, disponibilidade, repetição, `Effect` (`READ`, `WRITE`, `EXTERNAL_READ`, `EXTERNAL_WRITE`, `OUTPUT` ou `CONTROL`) e `RequiredInputs`.
 
-`execute_flow_action` recebe `{ "Action": "...", "Input": {} }`. O MCP cria um novo `RequestUUID` para cada intenção, chama o Core sem retry automático e preserva o `Output` sem transformação.
+`execute_flow_action` recebe `{ "Action": "...", "Input": {} }`. O MCP cria um novo `RequestUUID` para cada intenção, chama o Core sem retry automático e preserva o `Output` sem transformação. A resposta funcional inclui `Success`, `Action`, `Status`, `MissingInformation` e `Output`. `Status=NEEDS_INPUT` é uma conclusão válida da invocation e não gera `isError`; uma nova intenção do Agent pode gerar uma nova invocation. `Status=FAILED` gera `isError=true`.
 
 As três tools usam `CORE_API_URL` e `CORE_API_TIMEOUT_MS` para acessar os endpoints internos `/v1/ai-document/flow-actions/*`. Não consultam `Flow`/`ProcessLineFlow` no banco, não interpretam `ObjectType`, não resolvem `$CA_Input`, não aplicam `Repeatable` e não mantêm cache ou estado conversacional.
 
 Em uma execução bem-sucedida, `InvocationUUID`, `IdFlow` e `IdProcessLineFlow` ficam somente em `_meta.ca.FlowInvocation`. Em uma falha de execução, o MCP retorna `isError=true` e o envelope funcional com `Success`, `Action`, `Output` e `Error`.
+
+O teste `tests/integration/agenticFlowBridge.test.ts` usa transporte MCP HTTP real e um Core HTTP simulado para exercitar `list → describe → execute` com AUTO, PROMPT, CFL e `NEEDS_INPUT → COMPLETED`. Ele comprova o contrato da ponte deste repositório sem depender de Core ou Agent Runtime externos. O E2E inter-repositórios com Core e Runtime reais depende dos respectivos trabalhos e não é substituído por esse teste local.
 
 ## Navigation / Handoff
 
