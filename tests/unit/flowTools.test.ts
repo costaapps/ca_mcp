@@ -291,10 +291,9 @@ describe('Flow MCP tools', () => {
         Message: 'Falha retornada pelo serviço externo.'
       }
     });
-    expect(result.content).toEqual([{
-      type: 'text',
-      text: 'Falha retornada pelo serviço externo.'
-    }]);
+    const content = result.content[0];
+    if (content?.type !== 'text') throw new Error('Envelope de falha deve ser texto JSON.');
+    expect(JSON.parse(content.text)).toEqual(result.structuredContent);
     expect(log.toolCompleted).toHaveBeenCalledWith(expect.objectContaining({
       tool: 'execute_flow_action',
       success: false,
@@ -325,6 +324,9 @@ describe('Flow MCP tools', () => {
         Message: 'Contexto obrigatório ausente: Execution.ExecutionUUID'
       }
     });
+    const content = result.content[0];
+    if (content?.type !== 'text') throw new Error('Envelope de falha deve ser texto JSON.');
+    expect(JSON.parse(content.text)).toEqual(result.structuredContent);
     expect(executeFlowAction).not.toHaveBeenCalled();
   });
 });

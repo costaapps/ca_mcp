@@ -153,6 +153,9 @@ describe('ponte HTTP MCP → Core para capabilities Agentic', () => {
         expect(result.structuredContent).toEqual({
           Success: false, Action: action, Output: null, Error: { Code: code, Message: message }
         });
+        const content = result.content[0];
+        if (content?.type !== 'text') throw new Error('Envelope de falha deve ser texto JSON.');
+        expect(JSON.parse(content.text)).toEqual(result.structuredContent);
         expect(result._meta).toBeUndefined();
       }
 

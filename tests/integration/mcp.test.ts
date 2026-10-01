@@ -628,9 +628,9 @@ describe('MCP HTTP server', () => {
         Message: 'A capability já foi executada.'
       }
     });
-    expect(result.content).toEqual([
-      { type: 'text', text: 'A capability já foi executada.' }
-    ]);
+    const content = result.content[0];
+    if (content?.type !== 'text') throw new Error('Envelope de falha deve ser texto JSON.');
+    expect(JSON.parse(content.text)).toEqual(result.structuredContent);
   });
 
   it('integra list_navigation_destinations com MENU/HOME e contexto confiável', async () => {

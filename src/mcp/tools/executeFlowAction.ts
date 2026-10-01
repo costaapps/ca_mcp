@@ -55,18 +55,20 @@ function actionFromArguments(arguments_: unknown): string {
 }
 
 function executeFailureResult(error: McpToolError, action: string): CallToolResult {
+  const failure = {
+    Success: false,
+    Action: action,
+    Output: null,
+    Error: {
+      Code: error.code,
+      Message: error.message
+    }
+  };
+
   return {
     isError: true,
-    content: [{ type: 'text', text: error.message }],
-    structuredContent: {
-      Success: false,
-      Action: action,
-      Output: null,
-      Error: {
-        Code: error.code,
-        Message: error.message
-      }
-    }
+    content: [{ type: 'text', text: JSON.stringify(failure) }],
+    structuredContent: failure
   };
 }
 
