@@ -20,7 +20,7 @@ export const executeFlowActionInputSchema = z.object({
 const executeFlowActionSuccessSchema = z.object({
   Success: z.literal(true),
   Action: z.string(),
-  Status: z.enum(['COMPLETED', 'NEEDS_INPUT', 'FAILED']),
+  Status: z.enum(['COMPLETED', 'NEEDS_INPUT']),
   MissingInformation: z.array(z.string()),
   Output: jsonValueSchema
 });
@@ -124,12 +124,9 @@ export function registerExecuteFlowActionTool(
         }
 
         const result: CallToolResult = {
-          ...(response.Data.Status === 'FAILED' ? { isError: true } : {}),
           content: [{ type: 'text', text: response.Data.Status === 'NEEDS_INPUT'
             ? 'A capability precisa de informação adicional.'
-            : response.Data.Status === 'FAILED'
-              ? 'A capability não foi concluída.'
-              : 'Capability de Flow executada com sucesso.' }],
+            : 'Capability de Flow executada com sucesso.' }],
           structuredContent: {
             Success: true,
             Action: response.Data.Action,
@@ -143,7 +140,7 @@ export function registerExecuteFlowActionTool(
         dependencies.logger.toolCompleted({
           tool: TOOL_NAME,
           durationMs: Date.now() - startedAt,
-          success: response.Data.Status !== 'FAILED',
+          success: true,
           ExecutionUUID: executionUUID,
           TurnUUID: turnUUID,
           RequestUUID: requestUUIDForLog,

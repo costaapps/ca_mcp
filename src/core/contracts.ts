@@ -48,7 +48,7 @@ export interface CoreFlowInvocation {
 
 export interface CoreExecuteFlowActionData {
   Action: string;
-  Status: 'COMPLETED' | 'NEEDS_INPUT' | 'FAILED';
+  Status: 'COMPLETED' | 'NEEDS_INPUT';
   MissingInformation: string[];
   Output: JsonValue;
   Invocation: CoreFlowInvocation;

@@ -59,7 +59,7 @@ As Navigation tools exigem, exclusivamente em `_meta.ca.Execution`, `ExecutionUU
 
 `describe_flow_action` recebe apenas `{ "Action": "..." }` e retorna descrição, disponibilidade, repetição, `Effect` (`READ`, `WRITE`, `EXTERNAL_READ`, `EXTERNAL_WRITE`, `OUTPUT` ou `CONTROL`) e `RequiredInputs`.
 
-`execute_flow_action` recebe `{ "Action": "...", "Input": {} }`. O MCP cria um novo `RequestUUID` para cada intenção, chama o Core sem retry automático e preserva o `Output` sem transformação. A resposta funcional inclui `Success`, `Action`, `Status`, `MissingInformation` e `Output`. `Status=NEEDS_INPUT` é uma conclusão válida da invocation e não gera `isError`; uma nova intenção do Agent pode gerar uma nova invocation. `Status=FAILED` gera `isError=true`.
+`execute_flow_action` recebe `{ "Action": "...", "Input": {} }`. O MCP cria um novo `RequestUUID` para cada intenção, chama o Core sem retry automático e preserva o `Output` sem transformação. A resposta funcional de sucesso inclui `Success=true`, `Action`, `Status` (`COMPLETED` ou `NEEDS_INPUT`), `MissingInformation` e `Output`. `Status=NEEDS_INPUT` é uma conclusão válida da invocation e não gera `isError`; uma nova intenção do Agent pode gerar uma nova invocation. Falhas usam exclusivamente o envelope `Success=false`, `Action`, `Output=null` e `Error` com `Code` e `Message`, junto de `isError=true`.
 
 As três tools usam `CORE_API_URL` e `CORE_API_TIMEOUT_MS` para acessar os endpoints internos `/v1/ai-document/flow-actions/*`. Não consultam `Flow`/`ProcessLineFlow` no banco, não interpretam `ObjectType`, não resolvem `$CA_Input`, não aplicam `Repeatable` e não mantêm cache ou estado conversacional.
 

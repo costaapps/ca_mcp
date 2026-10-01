@@ -56,7 +56,7 @@ export const coreDescribeFlowActionDataSchema = z.object({
 
 export const coreExecuteFlowActionDataSchema = z.object({
   Action: nonEmptyStringSchema,
-  Status: z.enum(['COMPLETED', 'NEEDS_INPUT', 'FAILED']),
+  Status: z.enum(['COMPLETED', 'NEEDS_INPUT']),
   MissingInformation: z.array(nonEmptyStringSchema),
   Output: jsonValueSchema,
   Invocation: z.object({
