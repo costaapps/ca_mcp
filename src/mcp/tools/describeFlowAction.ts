@@ -17,11 +17,12 @@ export const describeFlowActionOutputSchema = z.object({
   Action: z.string(),
   Description: z.string(),
   Repeatable: z.boolean(),
+  Effect: z.enum(['READ', 'WRITE', 'EXTERNAL_READ', 'EXTERNAL_WRITE', 'OUTPUT', 'CONTROL']),
   Available: z.boolean(),
   ExecutionCount: z.number().int().nonnegative(),
   UnavailableReason: z.string().nullable(),
   RequiredInputs: z.array(z.string())
-}).passthrough();
+});
 
 const TOOL_NAME = 'describe_flow_action';
 
@@ -37,7 +38,7 @@ export function registerDescribeFlowActionTool(
   server.registerTool(
     TOOL_NAME,
     {
-      description: 'Obtém detalhes, disponibilidade e inputs necessários de uma Action. Consulte antes de executar qualquer capability.',
+      description: 'Descreve uma capability descoberta, incluindo Effect, disponibilidade e RequiredInputs. Consulte antes de execute_flow_action.',
       inputSchema: describeFlowActionInputSchema,
       outputSchema: describeFlowActionOutputSchema
     },

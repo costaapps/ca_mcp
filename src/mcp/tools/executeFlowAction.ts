@@ -20,6 +20,8 @@ export const executeFlowActionInputSchema = z.object({
 const executeFlowActionSuccessSchema = z.object({
   Success: z.literal(true),
   Action: z.string(),
+  Status: z.enum(['COMPLETED', 'NEEDS_INPUT']),
+  MissingInformation: z.array(z.string()),
   Output: jsonValueSchema
 });
 
@@ -53,18 +55,20 @@ function actionFromArguments(arguments_: unknown): string {
 }
 
 function executeFailureResult(error: McpToolError, action: string): CallToolResult {
+  const failure = {
+    Success: false,
+    Action: action,
+    Output: null,
+    Error: {
+      Code: error.code,
+      Message: error.message
+    }
+  };
+
   return {
     isError: true,
-    content: [{ type: 'text', text: error.message }],
-    structuredContent: {
-      Success: false,
-      Action: action,
-      Output: null,
-      Error: {
-        Code: error.code,
-        Message: error.message
-      }
-    }
+    content: [{ type: 'text', text: JSON.stringify(failure) }],
+    structuredContent: failure
   };
 }
 
@@ -75,7 +79,7 @@ export function registerExecuteFlowActionTool(
   server.registerTool(
     TOOL_NAME,
     {
-      description: 'Executa uma capability do AIDocument atual. Use apenas uma Action descoberta e descrita. O Core revalida disponibilidade e lifecycle no momento da execução.',
+      description: 'Executa uma capability previamente descoberta e descrita. O resultado pode ser COMPLETED ou NEEDS_INPUT, que solicita informação adicional e não é erro MCP. O Core revalida disponibilidade e lifecycle.',
       inputSchema: executeFlowActionInputSchema,
       outputSchema: executeFlowActionOutputSchema
     },
@@ -122,10 +126,14 @@ export function registerExecuteFlowActionTool(
         }
 
         const result: CallToolResult = {
-          content: [{ type: 'text', text: 'Capability de Flow executada com sucesso.' }],
+          content: [{ type: 'text', text: response.Data.Status === 'NEEDS_INPUT'
+            ? 'A capability precisa de informação adicional.'
+            : 'Capability de Flow executada com sucesso.' }],
           structuredContent: {
             Success: true,
             Action: response.Data.Action,
+            Status: response.Data.Status,
+            MissingInformation: response.Data.MissingInformation,
             Output: response.Data.Output
           }
         };

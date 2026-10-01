@@ -15,8 +15,8 @@ export const listFlowActionsOutputSchema = z.object({
   Actions: z.array(z.object({
     Action: z.string(),
     Description: z.string()
-  }).passthrough())
-}).passthrough();
+  }))
+});
 
 const TOOL_NAME = 'list_flow_actions';
 
@@ -32,7 +32,7 @@ export function registerListFlowActionsTool(
   server.registerTool(
     TOOL_NAME,
     {
-      description: 'Lista as capacidades de Flow atualmente disponíveis no AIDocument. Use antes de selecionar uma capability e não invente nomes de Action.',
+      description: 'Descobre as capabilities do AIDocument atual, retornando somente Action e Description. Use antes de selecionar uma capability; não invente nomes de Action.',
       inputSchema: listFlowActionsInputSchema,
       outputSchema: listFlowActionsOutputSchema
     },

@@ -113,6 +113,7 @@ describe('MCP HTTP server', () => {
           Action: 'get_customer_details',
           Description: 'Consulta cliente.',
           Repeatable: true,
+          Effect: 'READ',
           Available: false,
           ExecutionCount: 1,
           UnavailableReason: 'Já executada neste estado.',
@@ -124,6 +125,8 @@ describe('MCP HTTP server', () => {
         ExecutionUUID: 'execution-1',
         Data: {
           Action: 'get_customer_details',
+          Status: 'COMPLETED',
+          MissingInformation: [],
           Output: { CustomerCode: 'C000123' },
           Invocation: {
             InvocationUUID: 'invocation-1',
@@ -536,6 +539,7 @@ describe('MCP HTTP server', () => {
       Action: 'get_customer_details',
       Description: 'Consulta cliente.',
       Repeatable: true,
+      Effect: 'READ',
       Available: false,
       ExecutionCount: 1,
       UnavailableReason: 'Já executada neste estado.',
@@ -569,6 +573,8 @@ describe('MCP HTTP server', () => {
     expect(result.structuredContent).toEqual({
       Success: true,
       Action: 'get_customer_details',
+      Status: 'COMPLETED',
+      MissingInformation: [],
       Output: { CustomerCode: 'C000123' }
     });
     expect(result.structuredContent).not.toHaveProperty('Invocation');
@@ -622,9 +628,9 @@ describe('MCP HTTP server', () => {
         Message: 'A capability já foi executada.'
       }
     });
-    expect(result.content).toEqual([
-      { type: 'text', text: 'A capability já foi executada.' }
-    ]);
+    const content = result.content[0];
+    if (content?.type !== 'text') throw new Error('Envelope de falha deve ser texto JSON.');
+    expect(JSON.parse(content.text)).toEqual(result.structuredContent);
   });
 
   it('integra list_navigation_destinations com MENU/HOME e contexto confiável', async () => {
