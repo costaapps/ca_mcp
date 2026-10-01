@@ -46,6 +46,7 @@ export const coreListFlowActionsDataSchema = z.object({
 export const coreDescribeFlowActionDataSchema = z.object({
   Action: nonEmptyStringSchema,
   Description: z.string(),
+  ObjectDescription: z.string().nullable().optional(),
   Repeatable: z.boolean(),
   Effect: z.enum(['READ', 'WRITE', 'EXTERNAL_READ', 'EXTERNAL_WRITE', 'OUTPUT', 'CONTROL']),
   Available: z.boolean(),
