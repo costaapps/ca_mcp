@@ -30,7 +30,7 @@ function respond(response: ServerResponse, data: unknown): void {
 }
 
 describe('ponte HTTP MCP → Core para capabilities Agentic', () => {
-  it('lista, descreve e executa AUTO/PROMPT/CFL com NEEDS_INPUT e retry somente por nova intenção', async () => {
+  it('lista, descreve e executa capabilities, preserva falhas e rejeita status de sucesso inválido', async () => {
     const requests: Array<{ path: string | undefined; body: Record<string, unknown> }> = [];
     const core = createServer((request, response) => {
       void bodyOf(request).then((body) => {
@@ -54,6 +54,21 @@ describe('ponte HTTP MCP → Core para capabilities Agentic', () => {
           return;
         }
         const action = body.Action as string;
+        if (action === 'execution_error') {
+          response.writeHead(422, { 'content-type': 'application/json' });
+          response.end(JSON.stringify({
+            Success: false, ExecutionUUID: 'execution-1', Data: null,
+            Error: { Code: 'FLOW_ACTION_ERROR', Message: 'Falha funcional retornada pelo Core.' }
+          }));
+          return;
+        }
+        if (action === 'invalid_success') {
+          respond(response, {
+            Action: action, Status: 'FAILED', MissingInformation: [], Output: null,
+            Invocation: { InvocationUUID: 'invalid-invocation', IdFlow: 10, IdProcessLineFlow: 20 }
+          });
+          return;
+        }
         const ambiguous = action === 'set_carrier' && body.Input &&
           (body.Input as Record<string, unknown>).Value === 'jadlog';
         respond(response, {
@@ -129,9 +144,21 @@ describe('ponte HTTP MCP → Core para capabilities Agentic', () => {
         expect(result._meta).toMatchObject({ ca: { FlowInvocation: { IdFlow: 10, IdProcessLineFlow: 20 } } });
       }
 
+      for (const [action, code, message] of [
+        ['execution_error', 'FLOW_ACTION_ERROR', 'Falha funcional retornada pelo Core.'],
+        ['invalid_success', 'CORE_CONTRACT_ERROR', 'O Core retornou dados incompatíveis com o contrato da operação.']
+      ]) {
+        const result = await client.callTool({ name: 'execute_flow_action', arguments: { Action: action, Input: {} }, _meta });
+        expect(result.isError).toBe(true);
+        expect(result.structuredContent).toEqual({
+          Success: false, Action: action, Output: null, Error: { Code: code, Message: message }
+        });
+        expect(result._meta).toBeUndefined();
+      }
+
       const executeRequests = requests.filter((request) => request.path?.endsWith('/execute'));
-      expect(executeRequests).toHaveLength(4);
-      expect(new Set(executeRequests.map((request) => request.body.RequestUUID)).size).toBe(4);
+      expect(executeRequests).toHaveLength(6);
+      expect(new Set(executeRequests.map((request) => request.body.RequestUUID)).size).toBe(6);
       for (const request of requests) {
         expect(request.body).toMatchObject({ ExecutionUUID: 'execution-1', IdCompany: 1003, IdProcessLine: 456 });
         expect(request.body).not.toHaveProperty('TurnUUID');

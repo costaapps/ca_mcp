@@ -6,7 +6,7 @@ import type {
   JsonValue
 } from '../../src/core/contracts.js';
 import { registerDescribeFlowActionTool } from '../../src/mcp/tools/describeFlowAction.js';
-import { registerExecuteFlowActionTool } from '../../src/mcp/tools/executeFlowAction.js';
+import { executeFlowActionOutputSchema, registerExecuteFlowActionTool } from '../../src/mcp/tools/executeFlowAction.js';
 import { registerListFlowActionsTool } from '../../src/mcp/tools/listFlowActions.js';
 import type { McpLogger } from '../../src/mcp/logger.js';
 
@@ -249,19 +249,14 @@ describe('Flow MCP tools', () => {
     expect(executeFlowAction).toHaveBeenCalledTimes(1);
   });
 
-  it('execute_flow_action sinaliza Status FAILED como erro funcional', async () => {
-    const callback = captureCallback((server) => registerExecuteFlowActionTool(server, {
-      coreFlowClient: coreClient({ executeFlowAction: vi.fn().mockResolvedValue({
-        Success: true, ExecutionUUID: 'execution-1', Data: {
-          Action: 'set_carrier', Status: 'FAILED', MissingInformation: [], Output: null,
-          Invocation: { InvocationUUID: 'invocation-3', IdFlow: 3, IdProcessLineFlow: 4 }
-        }
-      }) }), logger: logger()
-    }));
-
-    const result = await callback({ Action: 'set_carrier', Input: {} }, contextWithMeta(executionMeta));
-    expect(result.isError).toBe(true);
-    expect(result.structuredContent).toMatchObject({ Success: true, Status: 'FAILED' });
+  it('o schema público rejeita FAILED em sucesso e aceita o envelope de falha', () => {
+    expect(executeFlowActionOutputSchema.safeParse({
+      Success: true, Action: 'set_carrier', Status: 'FAILED', MissingInformation: [], Output: null
+    }).success).toBe(false);
+    expect(executeFlowActionOutputSchema.safeParse({
+      Success: false, Action: 'set_carrier', Output: null,
+      Error: { Code: 'FLOW_ACTION_ERROR', Message: 'Não foi possível executar a capability.' }
+    }).success).toBe(true);
   });
 
   it('execute_flow_action preserva código/mensagem de erro externo no envelope funcional', async () => {

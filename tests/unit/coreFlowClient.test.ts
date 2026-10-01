@@ -270,6 +270,24 @@ describe('CoreFlowClient', () => {
     }
   });
 
+  it('rejeita FAILED em envelope de sucesso sem fazer retry', async () => {
+    const fetchFn = fetchMock();
+    fetchFn.mockResolvedValueOnce(jsonResponse({
+      ...successEnvelope,
+      Data: {
+        Action: 'set_carrier', Status: 'FAILED', MissingInformation: [], Output: null,
+        Invocation: { InvocationUUID: 'invocation-1', IdFlow: 1, IdProcessLineFlow: 2 }
+      }
+    }));
+    const client = new CoreFlowClient({ baseUrl: 'http://core.internal', timeoutMs: 1000, fetchFn });
+
+    await expect(client.executeFlowAction({
+      ExecutionUUID: 'execution-1', IdCompany: 1003, IdProcessLine: 456,
+      RequestUUID: 'request-1', Action: 'set_carrier', Input: {}
+    })).rejects.toMatchObject({ code: 'CORE_CONTRACT_ERROR' });
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
   it('não faz retry automático de execute', async () => {
     const fetchFn = fetchMock();
     fetchFn.mockRejectedValue(new Error('timeout after write'));
