@@ -113,6 +113,7 @@ describe('MCP HTTP server', () => {
           Action: 'get_customer_details',
           Description: 'Consulta cliente.',
           Repeatable: true,
+          Effect: 'READ',
           Available: false,
           ExecutionCount: 1,
           UnavailableReason: 'Já executada neste estado.',
@@ -124,6 +125,8 @@ describe('MCP HTTP server', () => {
         ExecutionUUID: 'execution-1',
         Data: {
           Action: 'get_customer_details',
+          Status: 'COMPLETED',
+          MissingInformation: [],
           Output: { CustomerCode: 'C000123' },
           Invocation: {
             InvocationUUID: 'invocation-1',
@@ -536,6 +539,7 @@ describe('MCP HTTP server', () => {
       Action: 'get_customer_details',
       Description: 'Consulta cliente.',
       Repeatable: true,
+      Effect: 'READ',
       Available: false,
       ExecutionCount: 1,
       UnavailableReason: 'Já executada neste estado.',
@@ -569,6 +573,8 @@ describe('MCP HTTP server', () => {
     expect(result.structuredContent).toEqual({
       Success: true,
       Action: 'get_customer_details',
+      Status: 'COMPLETED',
+      MissingInformation: [],
       Output: { CustomerCode: 'C000123' }
     });
     expect(result.structuredContent).not.toHaveProperty('Invocation');

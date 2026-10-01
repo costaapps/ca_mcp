@@ -92,7 +92,9 @@ describe('Flow MCP tools', () => {
   it('list_flow_actions mantém as capabilities devolvidas pelo Core sem consultar banco', async () => {
     const actions = [{
       Action: 'get_customer_details',
-      Description: 'Consulta cliente.'
+      Description: 'Consulta cliente.',
+      IdFlow: 123,
+      ObjectType: 'AUTO'
     }];
     const listFlowActions = vi.fn().mockResolvedValue({
       Success: true,
@@ -106,7 +108,9 @@ describe('Flow MCP tools', () => {
 
     const result = await callback({}, contextWithMeta(executionMeta));
 
-    expect(result.structuredContent).toEqual({ Actions: actions });
+    expect(result.structuredContent).toEqual({ Actions: [{
+      Action: 'get_customer_details', Description: 'Consulta cliente.'
+    }] });
   });
 
   it('describe_flow_action retorna RequiredInputs e trata Available=false como sucesso', async () => {
@@ -117,6 +121,7 @@ describe('Flow MCP tools', () => {
         Action: 'create_sales_order',
         Description: 'Cria o pedido.',
         Repeatable: false,
+        Effect: 'EXTERNAL_WRITE',
         Available: false,
         ExecutionCount: 1,
         UnavailableReason: 'Já executada.',
@@ -138,6 +143,7 @@ describe('Flow MCP tools', () => {
       Action: 'create_sales_order',
       Description: 'Cria o pedido.',
       Repeatable: false,
+      Effect: 'EXTERNAL_WRITE',
       Available: false,
       ExecutionCount: 1,
       UnavailableReason: 'Já executada.',
@@ -164,6 +170,8 @@ describe('Flow MCP tools', () => {
       ExecutionUUID: 'execution-1',
       Data: {
         Action: 'create_sales_order',
+        Status: 'COMPLETED',
+        MissingInformation: [],
         Output: value as JsonValue,
         Invocation: {
           InvocationUUID: 'invocation-1',
@@ -187,6 +195,8 @@ describe('Flow MCP tools', () => {
     expect(result.structuredContent).toEqual({
       Success: true,
       Action: 'create_sales_order',
+      Status: 'COMPLETED',
+      MissingInformation: [],
       Output: value
     });
     expect(result.structuredContent).not.toHaveProperty('Invocation');
@@ -207,6 +217,51 @@ describe('Flow MCP tools', () => {
       Action: 'create_sales_order',
       Input: {}
     });
+  });
+
+  it('execute_flow_action retorna NEEDS_INPUT sem erro e preserva candidatos e Invocation em meta', async () => {
+    const output = {
+      Status: 'AMBIGUOUS',
+      RequestedValue: 'jadlog',
+      Candidates: [{ Value: '12', Label: 'Jadlog' }, { Value: '18', Label: 'Jadlog Transportes' }]
+    };
+    const executeFlowAction = vi.fn().mockResolvedValue({
+      Success: true,
+      ExecutionUUID: 'execution-1',
+      Data: {
+        Action: 'set_carrier', Status: 'NEEDS_INPUT', MissingInformation: ['Value'], Output: output,
+        Invocation: { InvocationUUID: 'invocation-2', IdFlow: 3, IdProcessLineFlow: 4 }
+      }
+    });
+    const callback = captureCallback((server) => registerExecuteFlowActionTool(server, {
+      coreFlowClient: coreClient({ executeFlowAction }), logger: logger(), requestUUID: () => 'request-2'
+    }));
+
+    const result = await callback({ Action: 'set_carrier', Input: { Value: 'jadlog' } }, contextWithMeta(executionMeta));
+
+    expect(result.isError).not.toBe(true);
+    expect(result.structuredContent).toEqual({
+      Success: true, Action: 'set_carrier', Status: 'NEEDS_INPUT', MissingInformation: ['Value'], Output: output
+    });
+    expect(result._meta).toEqual({ ca: { FlowInvocation: {
+      InvocationUUID: 'invocation-2', IdFlow: 3, IdProcessLineFlow: 4
+    } } });
+    expect(executeFlowAction).toHaveBeenCalledTimes(1);
+  });
+
+  it('execute_flow_action sinaliza Status FAILED como erro funcional', async () => {
+    const callback = captureCallback((server) => registerExecuteFlowActionTool(server, {
+      coreFlowClient: coreClient({ executeFlowAction: vi.fn().mockResolvedValue({
+        Success: true, ExecutionUUID: 'execution-1', Data: {
+          Action: 'set_carrier', Status: 'FAILED', MissingInformation: [], Output: null,
+          Invocation: { InvocationUUID: 'invocation-3', IdFlow: 3, IdProcessLineFlow: 4 }
+        }
+      }) }), logger: logger()
+    }));
+
+    const result = await callback({ Action: 'set_carrier', Input: {} }, contextWithMeta(executionMeta));
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toMatchObject({ Success: true, Status: 'FAILED' });
   });
 
   it('execute_flow_action preserva código/mensagem de erro externo no envelope funcional', async () => {

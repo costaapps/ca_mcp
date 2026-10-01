@@ -64,6 +64,7 @@ describe('CoreFlowClient', () => {
           Action: 'create_sales_order',
           Description: 'Cria pedido.',
           Repeatable: false,
+          Effect: 'EXTERNAL_WRITE',
           Available: true,
           ExecutionCount: 0,
           UnavailableReason: null,
@@ -74,6 +75,8 @@ describe('CoreFlowClient', () => {
         ...successEnvelope,
         Data: {
           Action: 'create_sales_order',
+          Status: 'COMPLETED',
+          MissingInformation: [],
           Output: ['created'],
           Invocation: {
             InvocationUUID: 'invocation-1',
@@ -240,6 +243,31 @@ describe('CoreFlowClient', () => {
     await expect(client.listFlowActions(request)).rejects.toMatchObject({
       code: 'CORE_CONTRACT_ERROR'
     });
+  });
+
+  it('exige Effect válido, Status e MissingInformation no contrato Core', async () => {
+    const fetchFn = fetchMock();
+    fetchFn
+      .mockResolvedValueOnce(jsonResponse({ ...successEnvelope, Data: {
+        Action: 'set_carrier', Description: 'Define transportadora.', Repeatable: true,
+        Effect: 'UNKNOWN', Available: true, ExecutionCount: 0,
+        UnavailableReason: null, RequiredInputs: ['Value']
+      } }))
+      .mockResolvedValueOnce(jsonResponse({ ...successEnvelope, Data: {
+        Action: 'set_carrier', Output: null,
+        Invocation: { InvocationUUID: 'invocation-1', IdFlow: 1, IdProcessLineFlow: 2 }
+      } }))
+      .mockResolvedValueOnce(jsonResponse({ ...successEnvelope, Data: {
+        Action: 'set_carrier', Status: 'NEEDS_INPUT', Output: null,
+        Invocation: { InvocationUUID: 'invocation-1', IdFlow: 1, IdProcessLineFlow: 2 }
+      } }));
+    const client = new CoreFlowClient({ baseUrl: 'http://core.internal', timeoutMs: 1000, fetchFn });
+    const context = { ExecutionUUID: 'execution-1', IdCompany: 1003, IdProcessLine: 456 };
+    await expect(client.describeFlowAction({ ...context, Action: 'set_carrier' })).rejects.toMatchObject({ code: 'CORE_CONTRACT_ERROR' });
+    for (let index = 0; index < 2; index++) {
+      await expect(client.executeFlowAction({ ...context, RequestUUID: 'request-1', Action: 'set_carrier', Input: {} }))
+        .rejects.toMatchObject({ code: 'CORE_CONTRACT_ERROR' });
+    }
   });
 
   it('não faz retry automático de execute', async () => {
