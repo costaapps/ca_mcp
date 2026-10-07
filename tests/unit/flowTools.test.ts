@@ -5,7 +5,7 @@ import type {
   CoreFlowClientContract,
   JsonValue
 } from '../../src/core/contracts.js';
-import { registerDescribeFlowActionTool } from '../../src/mcp/tools/describeFlowAction.js';
+import { describeFlowActionOutputSchema, registerDescribeFlowActionTool } from '../../src/mcp/tools/describeFlowAction.js';
 import { executeFlowActionOutputSchema, registerExecuteFlowActionTool } from '../../src/mcp/tools/executeFlowAction.js';
 import { registerListFlowActionsTool } from '../../src/mcp/tools/listFlowActions.js';
 import type { McpLogger } from '../../src/mcp/logger.js';
@@ -60,6 +60,54 @@ function coreClient(overrides: Partial<CoreFlowClientContract> = {}): CoreFlowCl
 }
 
 describe('Flow MCP tools', () => {
+  it.each([
+    {},
+    { ObjectDescription: null },
+    { ObjectDescription: '' },
+    { ObjectDescription: 'Resposta deve estar toda em maiúsculo' },
+    { ObjectDescription: '  Orientação empresarial livre.\nNão resumir: ç / "Value".  ' }
+  ])('describe preserva ObjectDescription em structuredContent: %j', async (description) => {
+    const data = {
+      Action: 'inform_code', Description: 'Informar código.', Repeatable: true,
+      Effect: 'WRITE', Available: true, ExecutionCount: 0,
+      UnavailableReason: null, RequiredInputs: ['Value'],
+      ...description
+    };
+    const describeFlowAction = vi.fn().mockResolvedValue({
+      Success: true, ExecutionUUID: 'execution-1',
+      Data: { ...data, IdFlow: 123, ObjectType: 'PROMPT', DataType: 'string' }
+    });
+    const log = logger();
+    const callback = captureCallback((server) => registerDescribeFlowActionTool(server, {
+      coreFlowClient: coreClient({ describeFlowAction }), logger: log
+    }));
+
+    const result = await callback({ Action: 'inform_code' }, contextWithMeta(executionMeta));
+
+    expect(result.isError).not.toBe(true);
+    expect(result.structuredContent).toEqual(data);
+    expect(result._meta).toBeUndefined();
+    expect(describeFlowAction).toHaveBeenCalledWith({
+      ExecutionUUID: 'execution-1', IdCompany: 1003, IdProcessLine: 456, Action: 'inform_code'
+    });
+    expect(log.toolCompleted).toHaveBeenCalledWith({
+      tool: 'describe_flow_action', durationMs: expect.any(Number), success: true,
+      ExecutionUUID: 'execution-1', TurnUUID: 'turn-1'
+    });
+    expect(log.serverError).not.toHaveBeenCalled();
+    if (!('ObjectDescription' in description)) {
+      expect(result.structuredContent).not.toHaveProperty('ObjectDescription');
+    }
+  });
+
+  it.each([123, {}, []])('o schema da tool rejeita ObjectDescription inválido: %j', (value) => {
+    expect(describeFlowActionOutputSchema.safeParse({
+      Action: 'inform_code', Description: 'Informar código.', ObjectDescription: value,
+      Repeatable: true, Effect: 'WRITE', Available: true, ExecutionCount: 0,
+      UnavailableReason: null, RequiredInputs: ['Value']
+    }).success).toBe(false);
+  });
+
   it('list_flow_actions aceita input vazio, retorna lista vazia e registra sucesso', async () => {
     const listFlowActions = vi.fn().mockResolvedValue({
       Success: true,

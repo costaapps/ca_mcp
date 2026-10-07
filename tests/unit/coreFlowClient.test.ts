@@ -19,6 +19,49 @@ const successEnvelope = {
 };
 
 describe('CoreFlowClient', () => {
+  it.each([
+    {},
+    { ObjectDescription: null },
+    { ObjectDescription: '' },
+    { ObjectDescription: 'Resposta deve estar toda em maiúsculo' },
+    { ObjectDescription: '  Orientação empresarial livre.\nNão resumir: ç / "Value".  ' }
+  ])('preserva ObjectDescription sem transformação no describe: %j', async (description) => {
+    const data = {
+      Action: 'inform_code', Description: 'Informar código.', Repeatable: true,
+      Effect: 'WRITE', Available: true, ExecutionCount: 0,
+      UnavailableReason: null, RequiredInputs: ['Value'],
+      ...description
+    };
+    const fetchFn = fetchMock();
+    fetchFn.mockResolvedValueOnce(jsonResponse({ ...successEnvelope, Data: data }));
+    const client = new CoreFlowClient({ baseUrl: 'http://core.internal', timeoutMs: 1000, fetchFn });
+
+    const result = await client.describeFlowAction({
+      ExecutionUUID: 'execution-1', IdCompany: 1003, IdProcessLine: 456, Action: 'inform_code'
+    });
+
+    expect(result).toEqual({ ...successEnvelope, Data: data });
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    if (!('ObjectDescription' in description)) {
+      expect(result.Data).not.toHaveProperty('ObjectDescription');
+    }
+  });
+
+  it.each([123, {}, []])('rejeita ObjectDescription inválido no contrato Core: %j', async (value) => {
+    const fetchFn = fetchMock();
+    fetchFn.mockResolvedValueOnce(jsonResponse({ ...successEnvelope, Data: {
+      Action: 'inform_code', Description: 'Informar código.', ObjectDescription: value,
+      Repeatable: true, Effect: 'WRITE', Available: true, ExecutionCount: 0,
+      UnavailableReason: null, RequiredInputs: ['Value']
+    } }));
+    const client = new CoreFlowClient({ baseUrl: 'http://core.internal', timeoutMs: 1000, fetchFn });
+
+    await expect(client.describeFlowAction({
+      ExecutionUUID: 'execution-1', IdCompany: 1003, IdProcessLine: 456, Action: 'inform_code'
+    })).rejects.toMatchObject({ code: 'CORE_CONTRACT_ERROR' });
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
   it('normaliza a URL base e envia a requisição de listagem exata', async () => {
     const request = {
       ExecutionUUID: 'execution-1',
