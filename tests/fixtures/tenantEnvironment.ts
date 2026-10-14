@@ -8,7 +8,8 @@ export const TEST_COMPANIES = Object.freeze({
   tenantA: Object.freeze({ companyUUID: '11111111-1111-4111-8111-111111111111', idCompany: 7, idDatabase: 10 }),
   tenantB: Object.freeze({ companyUUID: '22222222-2222-4222-8222-222222222222', idCompany: 7, idDatabase: 20 }),
   tenantSharedA: Object.freeze({ companyUUID: '33333333-3333-4333-8333-333333333333', idCompany: 8, idDatabase: 30 }),
-  tenantSharedB: Object.freeze({ companyUUID: '44444444-4444-4444-8444-444444444444', idCompany: 9, idDatabase: 30 })
+  tenantSharedB: Object.freeze({ companyUUID: '44444444-4444-4444-8444-444444444444', idCompany: 9, idDatabase: 30 }),
+  tenantNoCore: Object.freeze({ companyUUID: '55555555-5555-4555-8555-555555555555', idCompany: 10, idDatabase: 30 })
 });
 
 export type TestCompanyKey = keyof typeof TEST_COMPANIES;
@@ -146,7 +147,8 @@ export async function setupTenantEnvironment(options: TenantEnvironmentOptions):
     tenantA: Object.freeze({ ...TEST_COMPANIES.tenantA, idChat: 1007, idProcessLine: 5007, marker: 'TENANT-A' }),
     tenantB: Object.freeze({ ...TEST_COMPANIES.tenantB, idChat: 1007, idProcessLine: 5007, marker: 'TENANT-B' }),
     tenantSharedA: Object.freeze({ ...TEST_COMPANIES.tenantSharedA, idChat: 1008, idProcessLine: 5008, marker: 'TENANT-SHARED-A' }),
-    tenantSharedB: Object.freeze({ ...TEST_COMPANIES.tenantSharedB, idChat: 1009, idProcessLine: 5009, marker: 'TENANT-SHARED-B' })
+    tenantSharedB: Object.freeze({ ...TEST_COMPANIES.tenantSharedB, idChat: 1009, idProcessLine: 5009, marker: 'TENANT-SHARED-B' }),
+    tenantNoCore: Object.freeze({ ...TEST_COMPANIES.tenantNoCore, idChat: 1010, idProcessLine: 5010, marker: 'TENANT-NO-CORE' })
   });
 
   const admin = await mysql.createConnection({
@@ -203,11 +205,12 @@ export async function setupTenantEnvironment(options: TenantEnvironmentOptions):
         );
       }
       await registry.execute(
-        'INSERT INTO `Company` (`IdDatabase`, `IdCompany`, `CompanyUUID`, `Name`) VALUES (?, ?, ?, ?), (?, ?, ?, ?), (?, ?, ?, ?), (?, ?, ?, ?)',
+        'INSERT INTO `Company` (`IdDatabase`, `IdCompany`, `CompanyUUID`, `Name`) VALUES (?, ?, ?, ?), (?, ?, ?, ?), (?, ?, ?, ?), (?, ?, ?, ?), (?, ?, ?, ?)',
         [10, 7, companies.tenantA.companyUUID, 'Tenant A',
           20, 7, companies.tenantB.companyUUID, 'Tenant B',
           30, 8, companies.tenantSharedA.companyUUID, 'Tenant Shared A',
-          30, 9, companies.tenantSharedB.companyUUID, 'Tenant Shared B']
+          30, 9, companies.tenantSharedB.companyUUID, 'Tenant Shared B',
+          30, 10, companies.tenantNoCore.companyUUID, 'Tenant Without Core']
       );
     } finally {
       await registry.end();
@@ -227,7 +230,8 @@ export async function setupTenantEnvironment(options: TenantEnvironmentOptions):
             tenantA: 'Tenant A',
             tenantB: 'Tenant B',
             tenantSharedA: 'Tenant Shared A',
-            tenantSharedB: 'Tenant Shared B'
+            tenantSharedB: 'Tenant Shared B',
+            tenantNoCore: 'Tenant Without Core'
           };
           const label = labels[key];
           await seedCompany(connection, companies[key], label);
@@ -238,7 +242,7 @@ export async function setupTenantEnvironment(options: TenantEnvironmentOptions):
     };
     await seed(databases.tenantA, ['tenantA']);
     await seed(databases.tenantB, ['tenantB']);
-    await seed(databases.tenantShared, ['tenantSharedA', 'tenantSharedB']);
+    await seed(databases.tenantShared, ['tenantSharedA', 'tenantSharedB', 'tenantNoCore']);
 
     const coreUrl = (key: TestCompanyKey): string =>
       options.coreApiUrlByCompany?.[companies[key].companyUUID] ?? options.coreApiUrl ?? 'http://127.0.0.1:1';
@@ -278,7 +282,8 @@ export async function setupTenantEnvironment(options: TenantEnvironmentOptions):
       MCP_TEST_COMPANY_A_UUID: companies.tenantA.companyUUID,
       MCP_TEST_COMPANY_B_UUID: companies.tenantB.companyUUID,
       MCP_TEST_COMPANY_SHARED_A_UUID: companies.tenantSharedA.companyUUID,
-      MCP_TEST_COMPANY_SHARED_B_UUID: companies.tenantSharedB.companyUUID
+      MCP_TEST_COMPANY_SHARED_B_UUID: companies.tenantSharedB.companyUUID,
+      MCP_TEST_COMPANY_NO_CORE_UUID: companies.tenantNoCore.companyUUID
     });
 
     return {

@@ -168,6 +168,20 @@ describe('requireContext', () => {
     expect(() => requireFlowExecutionContext(meta, 1003)).toThrow('Execution.ExecutionUUID');
   });
 
+  it('rejeita IdCompany diferente do escopo resolvido para Flow e Navigation', () => {
+    const meta = extractCAMeta(contextWithMeta({ ca: { Execution: {
+      ExecutionUUID: 'execution-1',
+      TurnUUID: 'turn-1',
+      IdCompany: 1004,
+      IdProcessLine: 456
+    } } }));
+
+    expect(() => requireFlowExecutionContext(meta, 1003))
+      .toThrow('IdCompany diverge do tenant resolvido.');
+    expect(() => requireAgentExecutionContext(meta, 1003))
+      .toThrow('IdCompany diverge do tenant resolvido.');
+  });
+
   it('exige TurnUUID no contexto genérico de Agent sem alterar o contexto de Flow', () => {
     const meta = extractCAMeta(contextWithMeta({
       ca: { Execution: {

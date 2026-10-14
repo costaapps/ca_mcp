@@ -119,7 +119,8 @@ async function main(): Promise<void> {
         [TEST_COMPANIES.tenantA.companyUUID]: `${core.baseUrl}/tenant-a`,
         [TEST_COMPANIES.tenantB.companyUUID]: `${core.baseUrl}/tenant-b`,
         [TEST_COMPANIES.tenantSharedA.companyUUID]: `${core.baseUrl}/tenant-shared-a`,
-        [TEST_COMPANIES.tenantSharedB.companyUUID]: `${core.baseUrl}/tenant-shared-b`
+        [TEST_COMPANIES.tenantSharedB.companyUUID]: `${core.baseUrl}/tenant-shared-b`,
+        [TEST_COMPANIES.tenantNoCore.companyUUID]: ''
       }
     });
 

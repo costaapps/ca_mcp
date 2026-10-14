@@ -57,7 +57,8 @@ function company(key: TestCompanyKey): TestCompanyFixture {
     tenantA: 'MCP_TEST_COMPANY_A_UUID',
     tenantB: 'MCP_TEST_COMPANY_B_UUID',
     tenantSharedA: 'MCP_TEST_COMPANY_SHARED_A_UUID',
-    tenantSharedB: 'MCP_TEST_COMPANY_SHARED_B_UUID'
+    tenantSharedB: 'MCP_TEST_COMPANY_SHARED_B_UUID',
+    tenantNoCore: 'MCP_TEST_COMPANY_NO_CORE_UUID'
   };
   const raw = process.env[uuidEnvironment[key]];
   if (raw === undefined) throw new Error(`UUID de teste ausente para ${key}.`);
@@ -66,7 +67,8 @@ function company(key: TestCompanyKey): TestCompanyFixture {
     tenantA: { idCompany: 7, idDatabase: 10, idChat: 1007, idProcessLine: 5007, marker: 'TENANT-A' },
     tenantB: { idCompany: 7, idDatabase: 20, idChat: 1007, idProcessLine: 5007, marker: 'TENANT-B' },
     tenantSharedA: { idCompany: 8, idDatabase: 30, idChat: 1008, idProcessLine: 5008, marker: 'TENANT-SHARED-A' },
-    tenantSharedB: { idCompany: 9, idDatabase: 30, idChat: 1009, idProcessLine: 5009, marker: 'TENANT-SHARED-B' }
+    tenantSharedB: { idCompany: 9, idDatabase: 30, idChat: 1009, idProcessLine: 5009, marker: 'TENANT-SHARED-B' },
+    tenantNoCore: { idCompany: 10, idDatabase: 30, idChat: 1010, idProcessLine: 5010, marker: 'TENANT-NO-CORE' }
   };
   return { companyUUID: raw, ...definitions[key] };
 }
@@ -189,7 +191,7 @@ describe('isolamento multi-tenant em MariaDB efêmero', () => {
       const priceLists = await client.callTool({
         name: 'get_pricelists',
         arguments: {},
-        _meta: callMetadata(fixture)
+        _meta: callMetadata(fixture, { IdCompany: fixture.idCompany })
       });
       expect(priceLists.isError).not.toBe(true);
       expect(priceLists.structuredContent).toEqual({
@@ -201,7 +203,7 @@ describe('isolamento multi-tenant em MariaDB efêmero', () => {
         arguments: {},
         _meta: {
           ca: {
-            ...callMetadata(fixture).ca,
+            ...callMetadata(fixture, { IdCompany: fixture.idCompany }).ca,
             Resolved: { IdItem: 1 }
           }
         }
@@ -245,6 +247,47 @@ describe('isolamento multi-tenant em MariaDB efêmero', () => {
       expect(result.structuredContent).toEqual({
         Actions: [{ Action: expectedPath, Description: `Core ${expectedPath}` }]
       });
+
+      const navigation = await client.callTool({
+        name: 'list_navigation_destinations',
+        arguments: {},
+        _meta: callMetadata(fixture, {
+          IdCompany: fixture.idCompany,
+          IdProcessLine: fixture.idProcessLine,
+          ExecutionUUID: `execution-${fixture.marker}`,
+          TurnUUID: `turn-${fixture.marker}`
+        })
+      });
+      expect(navigation.isError).not.toBe(true);
+      expect(navigation.structuredContent).toEqual({ Destinations: [] });
+    }
+  });
+
+  it('mantém consultas SQL disponíveis quando a empresa não configura Core', async () => {
+    const fixture = company('tenantNoCore');
+    const products = await client.callTool({
+      name: 'get_products',
+      arguments: {},
+      _meta: callMetadata(fixture, { IdCompany: fixture.idCompany })
+    });
+    expect(products.isError).not.toBe(true);
+    expect(products.structuredContent).toMatchObject({
+      Products: [expect.objectContaining({ ItemCode: `CODE-${fixture.marker}` })]
+    });
+
+    for (const name of ['list_flow_actions', 'list_navigation_destinations']) {
+      const result = await client.callTool({
+        name,
+        arguments: {},
+        _meta: callMetadata(fixture, {
+          IdCompany: fixture.idCompany,
+          IdProcessLine: fixture.idProcessLine,
+          ExecutionUUID: 'execution-no-core',
+          TurnUUID: 'turn-no-core'
+        })
+      });
+      expect(result.isError).toBe(true);
+      expect(result.structuredContent).toEqual({ Code: 'CORE_UNAVAILABLE' });
     }
   });
 

@@ -7,7 +7,7 @@ import type { TenantContextProvider, TenantIdentity } from '../../tenancy/contra
 import { extractCAMeta } from '../context/caMeta.js';
 import type { CAMeta } from '../context/caMeta.js';
 import { getToolLogContext } from '../context/toolLogContext.js';
-import { withRequiredTenantContext } from '../context/requireContext.js';
+import { requireExecutionId, withRequiredTenantContext } from '../context/requireContext.js';
 import type { McpLogger } from '../logger.js';
 import { toToolErrorResult } from '../result.js';
 
@@ -62,6 +62,7 @@ export function registerGetProductsTool(
             throw new McpToolError(ERROR_CODES.INVALID_ARGUMENTS, 'Argumentos inválidos para consulta de produtos.');
           }
 
+          requireExecutionId(operationMeta, 'IdCompany');
           const products = await tenant.productRepository.getProducts({
             itemCode: parsedArguments.data.ItemCode,
             itemName: parsedArguments.data.ItemName,
