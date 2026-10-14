@@ -8,15 +8,22 @@ import {
   type TenantDescriptor
 } from './descriptor.js';
 
-const SELECT_TENANT = [
+const SELECT_TENANT_DESCRIPTOR = [
   'SELECT C.IdDatabase, C.IdCompany, C.Name AS CompanyName, C.CompanyUUID,',
   'D.Hostname, D.Port, D.DBName, D.Username, D.Password,',
   'D.IdDatabase AS DatabaseRecordId,',
   '(SELECT COUNT(*) FROM Company C2 WHERE C2.IdDatabase = C.IdDatabase',
   'AND C2.IdCompany = C.IdCompany) AS LocalIdentityCount',
-  'FROM Company C LEFT JOIN `Databases` D ON D.IdDatabase = C.IdDatabase',
-  'WHERE LOWER(C.CompanyUUID) = ? LIMIT 2'
+  'FROM Company C LEFT JOIN `Databases` D ON D.IdDatabase = C.IdDatabase'
 ].join(' ');
+
+const SELECT_TENANT = `${SELECT_TENANT_DESCRIPTOR} WHERE LOWER(C.CompanyUUID) = ? LIMIT 2`;
+
+// This metadata-only query validates the exact tables and columns needed by
+// tenant resolution without reading or selecting a particular tenant.
+const CHECK_REGISTRY_SCHEMA = `${SELECT_TENANT_DESCRIPTOR} LIMIT 0`;
+
+const DEFAULT_READINESS_TIMEOUT_MS = 5000;
 
 interface RegistryCacheEntry {
   readonly expiresAt: number;
@@ -28,6 +35,7 @@ export type TenantDatabaseDescriptor = TenantDescriptor;
 
 export interface CentralRegistryOptions {
   readonly ttlMs: number;
+  readonly readinessTimeoutMs?: number;
   readonly now?: () => number;
   readonly logger?: (event: Readonly<Record<string, string>>) => void;
 }
@@ -48,10 +56,12 @@ function registryUnavailable(error: unknown): McpToolError {
 
 export class CentralRegistry {
   private readonly ttlMs: number;
+  private readonly readinessTimeoutMs: number;
   private readonly now: () => number;
   private readonly logger: (event: Readonly<Record<string, string>>) => void;
   private readonly cache = new Map<string, RegistryCacheEntry>();
   private readonly pending = new Map<string, Promise<TenantDescriptor>>();
+  private readinessPending: Promise<void> | undefined;
 
   public constructor(
     private readonly pool: Pool,
@@ -60,7 +70,12 @@ export class CentralRegistry {
     if (!Number.isSafeInteger(options.ttlMs) || options.ttlMs < 0) {
       throw new TypeError('CENTRAL_REGISTRY_CACHE_MS deve ser um inteiro não negativo.');
     }
+    const readinessTimeoutMs = options.readinessTimeoutMs ?? DEFAULT_READINESS_TIMEOUT_MS;
+    if (!Number.isSafeInteger(readinessTimeoutMs) || readinessTimeoutMs <= 0) {
+      throw new TypeError('O timeout de readiness do Registry deve ser um inteiro positivo.');
+    }
     this.ttlMs = options.ttlMs;
+    this.readinessTimeoutMs = readinessTimeoutMs;
     this.now = options.now ?? Date.now;
     this.logger = options.logger ?? ((event) => console.error(JSON.stringify(event)));
   }
@@ -100,13 +115,47 @@ export class CentralRegistry {
     }
   }
 
-  public async ping(): Promise<void> {
+  public ping(): Promise<void> {
+    if (this.readinessPending) return this.readinessPending;
+
+    // mysql2's query timeout starts only after a connection is acquired. Keep
+    // this separate wall-clock deadline so readiness also bounds pool-queue
+    // wait, while retaining the driver's timeout after acquisition.
+    let query: Promise<void>;
     try {
-      await this.pool.execute('SELECT 1');
+      query = this.pool.query({
+        sql: CHECK_REGISTRY_SCHEMA,
+        timeout: this.readinessTimeoutMs
+      }).then(() => undefined);
     } catch (error) {
-      this.logFailure('central_registry_ping_failed', error);
-      throw registryUnavailable(error);
+      query = Promise.reject(error);
     }
+    let deadlineTimer: NodeJS.Timeout | undefined;
+    const deadline = new Promise<never>((_resolve, reject) => {
+      deadlineTimer = setTimeout(() => {
+        reject(Object.assign(new Error('Registry readiness deadline exceeded.'), { code: 'ETIMEDOUT' }));
+      }, this.readinessTimeoutMs);
+    });
+    const probe = Promise.race([query, deadline]).then(
+      () => {
+        if (deadlineTimer) clearTimeout(deadlineTimer);
+      },
+      (error: unknown) => {
+        if (deadlineTimer) clearTimeout(deadlineTimer);
+        this.logFailure('central_registry_readiness_failed', error);
+        throw registryUnavailable(error);
+      }
+    );
+
+    this.readinessPending = probe;
+    const clearPending = (): void => {
+      if (this.readinessPending === probe) this.readinessPending = undefined;
+    };
+    // A caller may time out while the pool query is still queued. Keep probes
+    // coalesced until that underlying query settles so health polling cannot
+    // fill the Registry pool's unbounded connection queue.
+    void query.then(clearPending, clearPending);
+    return probe;
   }
 
   public invalidate(companyUUID?: string): void {
@@ -182,4 +231,10 @@ export class CentralRegistry {
   }
 }
 
-export const centralRegistryInternals = { SELECT_TENANT, safeCode, registryUnavailable };
+export const centralRegistryInternals = {
+  SELECT_TENANT,
+  CHECK_REGISTRY_SCHEMA,
+  DEFAULT_READINESS_TIMEOUT_MS,
+  safeCode,
+  registryUnavailable
+};

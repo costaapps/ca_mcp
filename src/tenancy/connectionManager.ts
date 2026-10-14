@@ -156,7 +156,21 @@ export class ConnectionManager {
       this.current.set(idDatabase, entry);
       if (previous && previous !== entry) {
         previous.retired = true;
-        if (previous.references === 0) await this.closeEntry(previous);
+        if (previous.references === 0) {
+          // Publish the first reference before awaiting the old generation's
+          // asynchronous close. Capacity eviction must not mistake this new
+          // generation for an idle pool while this acquisition is suspended.
+          const firstLease = this.lease(entry);
+          try {
+            await this.closeEntry(previous);
+            this.assertLeaseUsable(entry);
+            return firstLease;
+          } catch (error) {
+            entry.retired = true;
+            await firstLease.release();
+            throw error;
+          }
+        }
       }
       return this.lease(entry);
     });
@@ -280,6 +294,12 @@ export class ConnectionManager {
   }
 
   private lease(entry: PoolGeneration): TenantPoolLease {
+    if (entry.closing || !this.active.has(entry)) {
+      throw tenantError(
+        TENANT_ERROR_CODES.databaseUnavailable,
+        'A geração da conexão da empresa deixou de estar disponível.'
+      );
+    }
     entry.references += 1;
     entry.lastUsedAt = this.now();
     let released = false;
@@ -299,6 +319,20 @@ export class ConnectionManager {
         this.notifyWaiters();
       }
     });
+  }
+
+  private assertLeaseUsable(entry: PoolGeneration): void {
+    this.assertAccepting();
+    if (
+      entry.closing ||
+      !this.active.has(entry) ||
+      this.current.get(entry.idDatabase) !== entry
+    ) {
+      throw tenantError(
+        TENANT_ERROR_CODES.databaseUnavailable,
+        'A geração da conexão da empresa deixou de estar disponível.'
+      );
+    }
   }
 
   private async withDatabaseLock<T>(idDatabase: number, operation: () => Promise<T>): Promise<T> {

@@ -76,7 +76,7 @@ A allowlist restringe quais empresas uma instalação atende. Ela não autentica
 
 ## Health, disponibilidade e limites operacionais
 
-`/health` permanece como liveness compatível; `/health/live` informa liveness e `/health/ready` verifica inicialização, Registry e estado de drenagem. Uma base de empresa indisponível afeta as chamadas dessa empresa, sem retirar a instalação inteira de readiness.
+`/health` permanece como liveness compatível; `/health/live` informa liveness e `/health/ready` verifica o Registry e o estado de drenagem. A verificação do Registry usa uma consulta sem linhas que referencia as tabelas e colunas necessárias à resolução, com timeout de 5 segundos; não seleciona uma empresa. Assim, schema incompleto, falta de permissão de leitura ou indisponibilidade central deixam o serviço not ready. Uma base de empresa indisponível afeta as chamadas dessa empresa, sem retirar a instalação inteira de readiness.
 
 No SIGTERM, o processo deixa de aceitar novas tools, espera as invocações em andamento até o prazo configurado e encerra pools e Registry. Logs de execução identificam a empresa, a base e os IDs de correlação disponíveis, sem credenciais, SQL bruto ou payloads de negócio.
 
@@ -84,4 +84,4 @@ Esta etapa não adiciona autenticação às APIs, roteamento de banco por requis
 
 ## Testes SQL
 
-`npm run test:database` é uma suíte opt-in contra MariaDB 11.8.6. Ela exige `MCP_TEST_DB_HOST`, `MCP_TEST_DB_PORT`, `MCP_TEST_DB_USER` e `MCP_TEST_DB_PASSWORD`, além da confirmação explícita `MCP_TEST_DB_ALLOW_CREATE_DROP=YES`. O runner aceita somente `localhost`, loopback ou o alias local `mariadb`, cria schemas temporários aleatórios e apaga exclusivamente os nomes que ele próprio criou. A suíte padrão não lê essas variáveis nem exige banco. Use uma instância MariaDB efêmera/local e uma credencial de teste com permissões limitadas de criação e remoção de schemas.
+`npm run test:database` é uma suíte opt-in contra MariaDB 11.8.6. Ela exige `MCP_TEST_DB_HOST`, `MCP_TEST_DB_PORT`, `MCP_TEST_DB_USER` e `MCP_TEST_DB_PASSWORD`, além da confirmação explícita `MCP_TEST_DB_ALLOW_CREATE_DROP=YES`. O runner aceita somente `localhost`, loopback ou o alias local `mariadb`, cria schemas temporários aleatórios e apaga exclusivamente os nomes que ele próprio criou. Os cenários de identidade e indisponibilidade alteram temporariamente credenciais ou identidade apenas nesses schemas e restauram os valores em `finally`; cache e roteamento do Core usam endpoints HTTP falsos locais. A suíte também exercita drain e SIGTERM via emissor de sinal isolado, sem sinalizar o processo de testes. A suíte padrão não lê essas variáveis nem exige banco. Use uma instância MariaDB efêmera/local e uma credencial de teste com permissões limitadas de criação e remoção de schemas.

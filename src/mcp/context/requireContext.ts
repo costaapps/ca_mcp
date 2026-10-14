@@ -142,7 +142,11 @@ export function optionalExecutionString(meta: CAMeta, key: string): string | und
 }
 
 export function requireFlowExecutionContext(meta: CAMeta, resolvedIdCompany: number): FlowExecutionContext {
+  const requestedIdCompany = requireExecutionId(meta, 'IdCompany');
   const tenantIdCompany = requirePositiveInteger(resolvedIdCompany, 'Tenant.IdCompany');
+  if (requestedIdCompany !== tenantIdCompany) {
+    throw new McpToolError('TENANT_IDENTITY_MISMATCH', 'IdCompany diverge do tenant resolvido.', 'Execution.IdCompany');
+  }
   const context = {
     ExecutionUUID: requireExecutionString(meta, 'ExecutionUUID'),
     IdCompany: tenantIdCompany,
@@ -157,7 +161,11 @@ export function requireFlowExecutionContext(meta: CAMeta, resolvedIdCompany: num
 }
 
 export function requireAgentExecutionContext(meta: CAMeta, resolvedIdCompany: number): AgentExecutionContext {
+  const requestedIdCompany = requireExecutionId(meta, 'IdCompany');
   const tenantIdCompany = requirePositiveInteger(resolvedIdCompany, 'Tenant.IdCompany');
+  if (requestedIdCompany !== tenantIdCompany) {
+    throw new McpToolError('TENANT_IDENTITY_MISMATCH', 'IdCompany diverge do tenant resolvido.', 'Execution.IdCompany');
+  }
   return {
     ExecutionUUID: requireExecutionString(meta, 'ExecutionUUID'),
     TurnUUID: requireExecutionString(meta, 'TurnUUID'),

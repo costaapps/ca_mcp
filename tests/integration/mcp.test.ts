@@ -356,7 +356,7 @@ describe('MCP HTTP server', () => {
     expect(flowRepository.getProcessLineFlowState).not.toHaveBeenCalled();
   });
 
-  it('aplica limite padrão em get_products e aceita ausência de IdCompany', async () => {
+  it('aplica limite padrão em get_products e exige IdCompany do contrato', async () => {
     const result = await callTenantTool(client, {
       name: 'get_products',
       arguments: {},
@@ -385,11 +385,12 @@ describe('MCP HTTP server', () => {
       arguments: {},
       _meta: { ca: { Execution: {} } }
     });
-    expect(withoutIdCompany.isError).not.toBe(true);
+    expect(withoutIdCompany.isError).toBe(true);
     expect(withoutIdCompany.structuredContent).toEqual({
-      Products: [{ IdItem: 10, ItemCode: 'CAR-10', ItemName: 'Carro', LongDescription: 'Descrição do carro', Price: 100 }]
+      Code: 'MISSING_CONTEXT',
+      Required: 'Execution.IdCompany'
     });
-    expect(productRepository.getProducts).toHaveBeenCalledTimes(2);
+    expect(productRepository.getProducts).toHaveBeenCalledTimes(1);
   });
 
   it('executa get_pricelists com contexto de empresa resolvido', async () => {
@@ -421,15 +422,18 @@ describe('MCP HTTP server', () => {
       resolved: { IdItem: 10 },
       structuredContent: { ProductsPriceLists: [{ IdItemPrice: 30, IdItem: 10, IdPriceList: 20, Price: 95 }] }
     }
-  ])('$name aceita CompanyUUID sem IdCompany', async ({ name, arguments: args, resolved, structuredContent }) => {
+  ])('$name exige IdCompany do contrato existente', async ({ name, arguments: args, resolved }) => {
     const result = await callTenantTool(client, {
       name,
       arguments: args,
       _meta: { ca: { Execution: {}, ...(resolved === undefined ? {} : { Resolved: resolved }) } }
     });
 
-    expect(result.isError).not.toBe(true);
-    expect(result.structuredContent).toEqual(structuredContent);
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toEqual({
+      Code: 'MISSING_CONTEXT',
+      Required: 'Execution.IdCompany'
+    });
   });
 
   it('executa get_products_pricelists com Resolved.IdItem e contexto de empresa resolvido', async () => {
@@ -501,7 +505,7 @@ describe('MCP HTTP server', () => {
     });
   });
 
-  it('resolve_product exige CompanyUUID e aceita ausência de IdCompany', async () => {
+  it('resolve_product exige CompanyUUID e IdCompany do contrato existente', async () => {
     const missingCompanyUUID = await client.callTool({
       name: 'resolve_product',
       arguments: { IdItem: 10 }
@@ -517,17 +521,12 @@ describe('MCP HTTP server', () => {
       arguments: { IdItem: 10 },
       _meta: { ca: { Execution: {} } }
     });
-    expect(withoutIdCompany.isError).not.toBe(true);
+    expect(withoutIdCompany.isError).toBe(true);
     expect(withoutIdCompany.structuredContent).toEqual({
-      Product: {
-        IdItem: 10,
-        ItemCode: 'CAR-10',
-        ItemName: 'Carro',
-        LongDescription: 'Descrição do carro',
-        Price: 100
-      }
+      Code: 'MISSING_CONTEXT',
+      Required: 'Execution.IdCompany'
     });
-    expect(productRepository.getProductById).toHaveBeenCalledWith({ idItem: 10 });
+    expect(productRepository.getProductById).not.toHaveBeenCalled();
 
     vi.mocked(productRepository.getProductById).mockResolvedValueOnce(null);
     const notFound = await callTenantTool(client, {
@@ -581,7 +580,7 @@ describe('MCP HTTP server', () => {
     expect(flowRepository.getProcessLineFlowState).not.toHaveBeenCalled();
   });
 
-  it('exige CompanyUUID e deriva IdCompany resolvido para Flow tools', async () => {
+  it('exige CompanyUUID e IdCompany do contrato para Flow tools', async () => {
     const missingCompanyUUID = await client.callTool({
       name: 'list_flow_actions',
       arguments: {}
@@ -600,15 +599,12 @@ describe('MCP HTTP server', () => {
         IdProcessLine: 456
       } } })
     });
-    expect(withoutIdCompany.isError).not.toBe(true);
+    expect(withoutIdCompany.isError).toBe(true);
     expect(withoutIdCompany.structuredContent).toEqual({
-      Actions: [{ Action: 'get_customer_details', Description: 'Consulta cliente.' }]
+      Code: 'MISSING_CONTEXT',
+      Required: 'Execution.IdCompany'
     });
-    expect(coreFlowClient.listFlowActions).toHaveBeenCalledWith({
-      ExecutionUUID: 'execution-1',
-      IdCompany: 1003,
-      IdProcessLine: 456
-    });
+    expect(coreFlowClient.listFlowActions).not.toHaveBeenCalled();
   });
 
   it('integra describe_flow_action e mantém Available=false como sucesso', async () => {
@@ -760,7 +756,7 @@ describe('MCP HTTP server', () => {
     });
   });
 
-  it('exige CompanyUUID e deriva IdCompany resolvido para navegação', async () => {
+  it('exige CompanyUUID e IdCompany do contrato para navegação', async () => {
     const missingCompanyUUID = await client.callTool({
       name: 'list_navigation_destinations',
       arguments: {}
@@ -780,18 +776,12 @@ describe('MCP HTTP server', () => {
         IdProcessLine: 456
       } } })
     });
-    expect(withoutIdCompany.isError).not.toBe(true);
+    expect(withoutIdCompany.isError).toBe(true);
     expect(withoutIdCompany.structuredContent).toEqual({
-      Destinations: [
-        { DestinationRef: 'nav_sales_opaque', Kind: 'MENU', Description: 'Vendas', MenuGroup: 'Atendimento', Keywords: 'comprar catálogo orçamento produto' },
-        { DestinationRef: 'nav_home_opaque', Kind: 'HOME', Description: 'Início', MenuGroup: null, Keywords: null }
-      ]
+      Code: 'MISSING_CONTEXT',
+      Required: 'Execution.IdCompany'
     });
-    expect(coreNavigationClient.listNavigationDestinations).toHaveBeenCalledWith({
-      ExecutionUUID: 'execution-1',
-      IdCompany: 1003,
-      IdProcessLine: 456
-    });
+    expect(coreNavigationClient.listNavigationDestinations).not.toHaveBeenCalled();
   });
 
   it('integra request_handoff, gera RequestUUID e não expõe HandoffUUID', async () => {

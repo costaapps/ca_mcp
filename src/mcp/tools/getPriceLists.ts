@@ -7,7 +7,7 @@ import { McpToolError } from '../../errors/McpToolError.js';
 import { extractCAMeta } from '../context/caMeta.js';
 import type { CAMeta } from '../context/caMeta.js';
 import { getToolLogContext } from '../context/toolLogContext.js';
-import { withRequiredTenantContext } from '../context/requireContext.js';
+import { requireExecutionId, withRequiredTenantContext } from '../context/requireContext.js';
 import type { McpLogger } from '../logger.js';
 import { toToolErrorResult } from '../result.js';
 
@@ -56,6 +56,7 @@ export function registerGetPriceListsTool(
             throw new McpToolError(ERROR_CODES.INVALID_ARGUMENTS, 'Argumentos inválidos para consulta de listas de preços.');
           }
 
+          requireExecutionId(operationMeta, 'IdCompany');
           const priceLists = await tenant.priceListRepository.getPriceLists({
             limit: parsedArguments.data.Limit
           });
