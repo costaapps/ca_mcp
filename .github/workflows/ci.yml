@@ -65,8 +65,8 @@ jobs:
           MCP_TEST_DB_ALLOW_CREATE_DROP: YES
         run: npm run test:database
 
-      - name: Deploy and rollback script tests
-        run: bash ops/ci/test-deploy-scripts.sh
+      - name: Compose configuration contract tests
+        run: bash ops/ci/test-compose-config.sh
 
       - name: Release publisher and artifact contract tests
         run: bash ops/ci/test-release-publish.sh

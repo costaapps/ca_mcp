@@ -2,7 +2,7 @@ name: ca-mcp
 
 services:
   mcp:
-    image: ${MCP_IMAGE:?set MCP_IMAGE to the published image digest}
+    image: ${MCP_IMAGE:?set MCP_IMAGE to the published release tag}
     init: true
     restart: unless-stopped
     read_only: true
@@ -14,7 +14,7 @@ services:
         host_ip: 127.0.0.1
         protocol: tcp
     env_file:
-      - ../../shared/runtime.env
+      - .env
     environment:
       NODE_ENV: production
       PORT: "3102"
@@ -46,4 +46,3 @@ services:
         max-file: "3"
     labels:
       com.costaapps.service: ca-mcp
-      com.costaapps.run: ${MCP_RUN_NUMBER:-local}
