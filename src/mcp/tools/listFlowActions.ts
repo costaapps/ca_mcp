@@ -1,11 +1,13 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
 
-import type { CoreFlowClientContract } from '../../core/contracts.js';
+import type { TenantContextProvider, TenantIdentity } from '../../tenancy/contracts.js';
 import { ERROR_CODES } from '../../errors/errorCodes.js';
 import { McpToolError } from '../../errors/McpToolError.js';
 import { extractCAMeta } from '../context/caMeta.js';
-import { requireFlowExecutionContext } from '../context/requireContext.js';
+import type { CAMeta } from '../context/caMeta.js';
+import { getToolLogContext } from '../context/toolLogContext.js';
+import { requireFlowExecutionContext, withRequiredTenantContext } from '../context/requireContext.js';
 import type { McpLogger } from '../logger.js';
 import { toToolErrorResult } from '../result.js';
 
@@ -21,7 +23,7 @@ export const listFlowActionsOutputSchema = z.object({
 const TOOL_NAME = 'list_flow_actions';
 
 export interface ListFlowActionsToolDependencies {
-  coreFlowClient: CoreFlowClientContract;
+  tenantContextProvider: TenantContextProvider;
   logger: McpLogger;
 }
 
@@ -40,36 +42,45 @@ export function registerListFlowActionsTool(
       const startedAt = Date.now();
       let executionUUID: string | undefined;
       let turnUUID: string | undefined;
+      let meta: CAMeta | undefined;
+      let tenantIdentity: TenantIdentity | undefined;
 
       try {
-        if (!listFlowActionsInputSchema.safeParse(arguments_).success) {
-          throw new McpToolError(ERROR_CODES.INVALID_ARGUMENTS, 'Argumentos inválidos para listar as capabilities de Flow.');
-        }
+        const operationMeta = extractCAMeta(ctx);
+        meta = operationMeta;
+        return await withRequiredTenantContext(dependencies.tenantContextProvider, operationMeta, async (tenant) => {
+          tenantIdentity = tenant.identity;
+          if (!listFlowActionsInputSchema.safeParse(arguments_).success) {
+            throw new McpToolError(ERROR_CODES.INVALID_ARGUMENTS, 'Argumentos inválidos para listar as capabilities de Flow.');
+          }
 
-        const meta = extractCAMeta(ctx);
-        const flowContext = requireFlowExecutionContext(meta);
-        executionUUID = flowContext.ExecutionUUID;
-        turnUUID = flowContext.TurnUUID;
-        const { TurnUUID: _turnUUID, ...request } = flowContext;
-        const response = await dependencies.coreFlowClient.listFlowActions(request);
+          const flowContext = requireFlowExecutionContext(operationMeta, tenant.identity.idCompany);
+          executionUUID = flowContext.ExecutionUUID;
+          turnUUID = flowContext.TurnUUID;
+          const { TurnUUID: _turnUUID, ...requestContext } = flowContext;
+          const request = { ...requestContext, IdCompany: tenant.identity.idCompany };
+          const coreFlowClient = await tenant.getCoreFlowClient();
+          const response = await coreFlowClient.listFlowActions(request);
 
-        if (!response.Success) {
-          throw new McpToolError(response.Error.Code, response.Error.Message);
-        }
+          if (!response.Success) {
+            throw new McpToolError(response.Error.Code, response.Error.Message);
+          }
 
-        const structuredContent = listFlowActionsOutputSchema.parse(response.Data);
-        dependencies.logger.toolCompleted({
-          tool: TOOL_NAME,
-          durationMs: Date.now() - startedAt,
-          success: true,
-          ExecutionUUID: executionUUID,
-          TurnUUID: turnUUID
+          const structuredContent = listFlowActionsOutputSchema.parse(response.Data);
+          dependencies.logger.toolCompleted({
+            tool: TOOL_NAME,
+            durationMs: Date.now() - startedAt,
+            success: true,
+            ExecutionUUID: executionUUID,
+            TurnUUID: turnUUID,
+            ...getToolLogContext(operationMeta, tenant.identity)
+          });
+
+          return {
+            content: [{ type: 'text' as const, text: 'Capabilities de Flow listadas com sucesso.' }],
+            structuredContent
+          };
         });
-
-        return {
-          content: [{ type: 'text' as const, text: 'Capabilities de Flow listadas com sucesso.' }],
-          structuredContent
-        };
       } catch (error) {
         const normalizedError = error instanceof McpToolError
           ? error
@@ -83,7 +94,8 @@ export function registerListFlowActionsTool(
           success: false,
           errorCode: normalizedError.code,
           ExecutionUUID: executionUUID,
-          TurnUUID: turnUUID
+          TurnUUID: turnUUID,
+          ...getToolLogContext(meta, tenantIdentity)
         });
 
         return toToolErrorResult(normalizedError);

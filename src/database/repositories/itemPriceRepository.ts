@@ -11,7 +11,6 @@ export interface ProductPriceListRecord {
 }
 
 export interface ProductPriceListSearch {
-  idCompany: number;
   idItem: number;
 }
 
@@ -20,7 +19,17 @@ export interface ItemPriceRepositoryContract {
 }
 
 export class ItemPriceRepository implements ItemPriceRepositoryContract {
-  public constructor(private readonly db: McpDatabase) {}
+  private readonly db: McpDatabase;
+  private readonly idCompany: number;
+
+  public constructor(db: McpDatabase, idCompany: number) {
+    if (!Number.isSafeInteger(idCompany) || idCompany <= 0) {
+      throw new RangeError('ItemPriceRepository exige um IdCompany positivo.');
+    }
+    this.db = db;
+    this.idCompany = idCompany;
+    Object.freeze(this);
+  }
 
   public async getProductsPriceLists(
     search: ProductPriceListSearch
@@ -34,7 +43,7 @@ export class ItemPriceRepository implements ItemPriceRepositoryContract {
       })
       .from(erpItemPrice)
       .where(and(
-        eq(erpItemPrice.idCompany, search.idCompany),
+        eq(erpItemPrice.idCompany, this.idCompany),
         eq(erpItemPrice.idItem, search.idItem)
       ))
       .orderBy(asc(erpItemPrice.idPriceList), asc(erpItemPrice.idItemPrice));

@@ -5,12 +5,15 @@ import { describe, expect, it } from 'vitest';
 import { extractCAMeta, getExecutionValue, getResolvedValue } from '../../src/mcp/context/caMeta.js';
 import {
   optionalExecutionString,
+  requireCompanyUUID,
   requireExecutionId,
   requireExecutionString,
   requireAgentExecutionContext,
   requireFlowExecutionContext,
-  requireResolvedId
+  requireResolvedId,
+  withRequiredTenantContext
 } from '../../src/mcp/context/requireContext.js';
+import { createTenantFixture, TEST_COMPANY_UUID } from '../fixtures/tenantContext.js';
 
 function contextWithMeta(meta: unknown): Pick<ServerContext, 'mcpReq'> {
   return {
@@ -60,6 +63,53 @@ describe('requireContext', () => {
     expect(requireResolvedId(meta, 'IdDocument')).toBe(987);
   });
 
+  it('exige CompanyUUID válido no Execution e normaliza para minúsculas', () => {
+    const upper = extractCAMeta(contextWithMeta({ ca: { Execution: {
+      CompanyUUID: '550E8400-E29B-41D4-A716-446655440000'
+    } } }));
+    expect(requireCompanyUUID(upper)).toBe('550e8400-e29b-41d4-a716-446655440000');
+
+    const missing = extractCAMeta(contextWithMeta({ ca: { Execution: {} } }));
+    expect(() => requireCompanyUUID(missing)).toThrow('Execution.CompanyUUID');
+    try {
+      requireCompanyUUID(missing);
+    } catch (error) {
+      expect(error).toMatchObject({ code: 'MISSING_CONTEXT', required: 'Execution.CompanyUUID' });
+    }
+
+    for (const value of ['not-a-uuid', '', '550e8400-e29b-41d4-a716-44665544000z', 7]) {
+      const invalid = extractCAMeta(contextWithMeta({ ca: { Execution: { CompanyUUID: value } } }));
+      expect(() => requireCompanyUUID(invalid)).toThrow('Execution.CompanyUUID');
+    }
+  });
+
+  it('encaminha cada operação ao provider com CompanyUUID normalizado', async () => {
+    const fixture = createTenantFixture();
+    const meta = extractCAMeta(contextWithMeta({ ca: { Execution: {
+      CompanyUUID: TEST_COMPANY_UUID.toUpperCase(),
+      ExecutionUUID: 'execution-1'
+    } } }));
+
+    await expect(withRequiredTenantContext(fixture.provider, meta, async (tenant) => tenant.identity.idCompany))
+      .resolves.toBe(1003);
+    expect(fixture.provider.withTenantContext).toHaveBeenCalledWith(
+      expect.objectContaining({ Execution: expect.objectContaining({ CompanyUUID: TEST_COMPANY_UUID }) }),
+      expect.any(Function)
+    );
+  });
+
+  it.each([
+    { name: 'ausente', execution: {} },
+    { name: 'malformado', execution: { CompanyUUID: 'empresa-a' } }
+  ])('não chama o provider quando CompanyUUID está $name', async ({ execution }) => {
+    const fixture = createTenantFixture();
+    const meta = extractCAMeta(contextWithMeta({ ca: { Execution: execution } }));
+
+    await expect(async () => withRequiredTenantContext(fixture.provider, meta, async () => 'unreachable'))
+      .rejects.toMatchObject({ code: execution.CompanyUUID === undefined ? 'MISSING_CONTEXT' : 'INVALID_CONTEXT' });
+    expect(fixture.provider.withTenantContext).not.toHaveBeenCalled();
+  });
+
   it('retorna MISSING_CONTEXT quando o requisito não existe', () => {
     const meta = extractCAMeta(contextWithMeta({ ca: { Execution: {} } }));
     expect(() => requireExecutionId(meta, 'IdChat')).toThrow('Execution.IdChat');
@@ -87,7 +137,7 @@ describe('requireContext', () => {
 
     expect(requireExecutionString(meta, 'ExecutionUUID')).toBe('execution-1');
     expect(optionalExecutionString(meta, 'TurnUUID')).toBe('turn-1');
-    expect(requireFlowExecutionContext(meta)).toEqual({
+    expect(requireFlowExecutionContext(meta, 1003)).toEqual({
       ExecutionUUID: 'execution-1',
       TurnUUID: 'turn-1',
       IdCompany: 1003,
@@ -115,7 +165,7 @@ describe('requireContext', () => {
       } }
     }));
 
-    expect(() => requireFlowExecutionContext(meta)).toThrow('Execution.ExecutionUUID');
+    expect(() => requireFlowExecutionContext(meta, 1003)).toThrow('Execution.ExecutionUUID');
   });
 
   it('exige TurnUUID no contexto genérico de Agent sem alterar o contexto de Flow', () => {
@@ -128,7 +178,7 @@ describe('requireContext', () => {
       } }
     }));
 
-    expect(requireAgentExecutionContext(meta)).toEqual({
+    expect(requireAgentExecutionContext(meta, 1003)).toEqual({
       ExecutionUUID: 'execution-1',
       TurnUUID: 'turn-1',
       IdCompany: 1003,
@@ -142,6 +192,6 @@ describe('requireContext', () => {
         IdProcessLine: 456
       } }
     }));
-    expect(() => requireAgentExecutionContext(missingTurn)).toThrow('Execution.TurnUUID');
+    expect(() => requireAgentExecutionContext(missingTurn, 1003)).toThrow('Execution.TurnUUID');
   });
 });

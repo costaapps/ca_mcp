@@ -12,14 +12,12 @@ export interface ProductRecord {
 }
 
 export interface ProductSearch {
-  idCompany: number;
   itemCode?: string;
   itemName?: string;
   limit: number;
 }
 
 export interface ProductByIdSearch {
-  idCompany: number;
   idItem: number;
 }
 
@@ -33,7 +31,17 @@ function containsInsensitive(column: SQLWrapper, value: string): SQL {
 }
 
 export class ProductRepository implements ProductRepositoryContract {
-  public constructor(private readonly db: McpDatabase) {}
+  private readonly db: McpDatabase;
+  private readonly idCompany: number;
+
+  public constructor(db: McpDatabase, idCompany: number) {
+    if (!Number.isSafeInteger(idCompany) || idCompany <= 0) {
+      throw new RangeError('ProductRepository exige um IdCompany positivo.');
+    }
+    this.db = db;
+    this.idCompany = idCompany;
+    Object.freeze(this);
+  }
 
   private selectProduct() {
     return this.db
@@ -65,7 +73,7 @@ export class ProductRepository implements ProductRepositoryContract {
 
   public async getProducts(search: ProductSearch): Promise<ProductRecord[]> {
     const conditions: SQL[] = [
-      eq(erpItem.idCompany, search.idCompany),
+      eq(erpItem.idCompany, this.idCompany),
       eq(erpItem.active, 'Y'),
       sql`UPPER(${erpItem.status}) = UPPER('Ativo')`
     ];
@@ -87,7 +95,7 @@ export class ProductRepository implements ProductRepositoryContract {
   public async getProductById(search: ProductByIdSearch): Promise<ProductRecord | null> {
     const rows = await this.selectProduct()
       .where(and(
-        eq(erpItem.idCompany, search.idCompany),
+        eq(erpItem.idCompany, this.idCompany),
         eq(erpItem.idItem, search.idItem),
         eq(erpItem.active, 'Y'),
         sql`UPPER(${erpItem.status}) = UPPER('Active')`

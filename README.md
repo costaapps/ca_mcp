@@ -1,6 +1,6 @@
 # Costa Apps MCP Server
 
-MCP Server da PoC AIDocument da Costa Apps. O serviço mantém as seis tools de consulta existentes sobre o banco Msg4 de homologação e expõe três Flow tools stateless que funcionam como adapter da API interna do Core:
+MCP Server da plataforma AIDocument da Costa Apps. O serviço roteia consultas e ferramentas operacionais para a base da empresa resolvida no Registry central; as Flow e Navigation tools funcionam como adapters stateless da API interna do Core:
 
 - `get_chat_history`
 - `get_process_line_flow_state`
@@ -17,37 +17,42 @@ MCP Server da PoC AIDocument da Costa Apps. O serviço mantém as seis tools de 
 ## Requisitos
 
 - Node.js 22+
-- MySQL/MariaDB acessível pela aplicação
+- Registry central acessível com credencial de leitura
+- Bases MariaDB/MySQL das empresas acessíveis pelo MCP
+- `MCP_TENANT_ALLOWLIST` com os UUIDs atendidos pela instalação; obrigatória em produção
 
 ## Configuração e execução
 
 ```powershell
 Copy-Item .env.example .env
-npm install
+npm ci
 npm run build
 npm start
 ```
 
-O processo escuta em `PORT` (padrão `3102`). Os endpoints são `GET /health` e `/mcp` via Streamable HTTP.
+Preencha no `.env` a conexão central e a allowlist. O processo escuta em `PORT` (padrão `3102`) e expõe `/mcp` via Streamable HTTP, `/health` e `/health/live` como liveness e `/health/ready` para readiness do Registry e do estado de drenagem.
 
-Não há migrations neste repositório: `Message` e `ProcessLineFlow` são tabelas existentes do Core.
+Não há migrations produtivas neste repositório: `Message`, `ProcessLineFlow` e as tabelas de negócio são existentes nas bases do Core. O Registry central é somente leitura.
 
 ## Metadata MCP
 
-As tools não recebem IDs técnicos em `arguments`. O Agent Runtime envia somente o contexto necessário em `_meta.ca`:
+As tools não recebem IDs técnicos em `arguments`. Em cada `tools/call`, o Agent Runtime envia a empresa em `_meta.ca.Execution.CompanyUUID`; os demais campos técnicos continuam conforme o contrato de cada tool:
 
 ```json
 {
-  "ca": {
-    "Execution": {
-      "IdChat": 123,
-      "IdProcessLine": 456
+  "_meta": {
+    "ca": {
+      "Execution": {
+        "CompanyUUID": "550e8400-e29b-41d4-a716-446655440000",
+        "IdChat": 123,
+        "IdProcessLine": 456
+      }
     }
   }
 }
 ```
 
-`get_chat_history` exige `Execution.IdChat`. `get_process_line_flow_state` exige `Execution.IdProcessLine`.
+`CompanyUUID` é obrigatório em todas as onze tools e não é necessário para `initialize` nem `tools/list`. `get_chat_history` exige `Execution.IdChat`. `get_process_line_flow_state` exige `Execution.IdProcessLine`. O MCP resolve a conexão pelo Registry; `IdDatabase` recebido, quando presente, serve apenas para conferência. Veja [docs/multitenancy.md](docs/multitenancy.md) para o fluxo de resolução, isolamento, configuração e limites operacionais.
 
 As Flow tools exigem, exclusivamente em `_meta.ca.Execution`, `ExecutionUUID`, `IdCompany` e `IdProcessLine`. `TurnUUID` é opcional e serve para correlação. IDs técnicos não fazem parte dos argumentos funcionais.
 
@@ -61,7 +66,7 @@ As Navigation tools exigem, exclusivamente em `_meta.ca.Execution`, `ExecutionUU
 
 `execute_flow_action` recebe `{ "Action": "...", "Input": {} }`. O MCP cria um novo `RequestUUID` para cada intenção, chama o Core sem retry automático e preserva o `Output` sem transformação. A resposta funcional de sucesso inclui `Success=true`, `Action`, `Status` (`COMPLETED` ou `NEEDS_INPUT`), `MissingInformation` e `Output`. `Status=NEEDS_INPUT` é uma conclusão válida da invocation e não gera `isError`; uma nova intenção do Agent pode gerar uma nova invocation. Falhas usam exclusivamente o envelope `Success=false`, `Action`, `Output=null` e `Error` com `Code` e `Message`, junto de `isError=true`.
 
-As três tools usam `CORE_API_URL` e `CORE_API_TIMEOUT_MS` para acessar os endpoints internos `/v1/ai-document/flow-actions/*`. Não consultam `Flow`/`ProcessLineFlow` no banco, não interpretam `ObjectType`, não resolvem `$CA_Input`, não aplicam `Repeatable` e não mantêm cache ou estado conversacional.
+As três tools resolvem `MSG4COREAPI` nas `GeneralSettings` da empresa e usam `CORE_API_TIMEOUT_MS` para acessar os endpoints internos `/v1/ai-document/flow-actions/*`. Não consultam `Flow`/`ProcessLineFlow` no banco, não interpretam `ObjectType`, não resolvem `$CA_Input`, não aplicam `Repeatable` e não mantêm cache ou estado conversacional.
 
 Em uma execução bem-sucedida, `InvocationUUID`, `IdFlow` e `IdProcessLineFlow` ficam somente em `_meta.ca.FlowInvocation`. Em uma falha de execução, o MCP retorna `isError=true` e o envelope funcional com `Success`, `Action`, `Output` e `Error`.
 
@@ -77,7 +82,7 @@ O teste `tests/integration/agenticFlowBridge.test.ts` usa transporte MCP HTTP re
 
 A suíte padrão não depende de um Core disponível. Para executar a validação real dos dois endpoints de Navigation, habilite explicitamente o teste com `CORE_NAVIGATION_INTEGRATION=1` e forneça `CORE_API_URL`, `CORE_NAVIGATION_EXECUTION_UUID`, `CORE_NAVIGATION_TURN_UUID`, `CORE_NAVIGATION_ID_COMPANY` e `CORE_NAVIGATION_ID_PROCESS_LINE`. O teste usa um `DestinationRef` retornado pela listagem do Core; `CORE_NAVIGATION_DESTINATION_REF` é opcional para selecionar um destino específico dessa lista. `CORE_NAVIGATION_TIMEOUT_MS`, `CORE_NAVIGATION_REASON` e `CORE_NAVIGATION_SUMMARY` também são opcionais. O teste usa uma nova `RequestUUID` e pode criar uma solicitação de handoff no Core configurado; por isso, deve ser executado somente contra um contexto de homologação autorizado.
 
-As duas tools usam os endpoints `/v1/agent-platform/navigation/destinations/list` e `/v1/agent-platform/navigation/handoffs/request`, sem retry automático. Em runtime, elas reutilizam `CORE_API_URL` e `CORE_API_TIMEOUT_MS`; as variáveis `CORE_NAVIGATION_*` acima são exclusivas do teste opt-in.
+As duas tools usam os endpoints `/v1/agent-platform/navigation/destinations/list` e `/v1/agent-platform/navigation/handoffs/request`, sem retry automático. Em runtime, o endereço é resolvido das `GeneralSettings` da empresa e `CORE_API_TIMEOUT_MS` define o limite da chamada. As variáveis `CORE_NAVIGATION_*`, inclusive o endereço de teste, são exclusivas do teste opt-in.
 
 ## Structured content
 
@@ -131,4 +136,4 @@ npm run build
 npm run lint
 ```
 
-Os testes usam repositories falsos por padrão e não exigem banco de homologação. O teste MCP sobe um HTTP local e usa `StreamableHTTPClientTransport` do SDK v2.
+Os testes padrão usam providers/repositories falsos e não exigem banco de homologação. O teste MCP sobe um HTTP local e usa `StreamableHTTPClientTransport` do SDK v2. A integração SQL real é opt-in via `npm run test:database` e MariaDB 11.8.6; requer `MCP_TEST_DB_HOST`, `MCP_TEST_DB_PORT`, `MCP_TEST_DB_USER`, `MCP_TEST_DB_PASSWORD` e a confirmação explícita `MCP_TEST_DB_ALLOW_CREATE_DROP=YES`. O runner aceita somente MariaDB local ou alias `mariadb`, cria schemas aleatórios, faz cleanup em `finally` e remove somente aqueles que criou.
