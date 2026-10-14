@@ -3,3 +3,8 @@ export * from './processLineFlow.js';
 export * from './erpItem.js';
 export * from './erpPriceList.js';
 export * from './erpItemPrice.js';
+export * from './company.js';
+export * from './generalSettings.js';
+export * from './chat.js';
+export * from './processLine.js';
+export * from './companyModule.js';

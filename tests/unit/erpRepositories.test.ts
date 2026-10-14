@@ -33,6 +33,20 @@ function limitedFakeDatabase<T>(rows: T[]): LimitedFakeQuery<T> {
   };
 }
 
+function sqlEvidence(value: unknown, evidence = { columns: [] as string[], params: [] as unknown[] }): typeof evidence {
+  if (Array.isArray(value)) {
+    for (const item of value) sqlEvidence(item, evidence);
+    return evidence;
+  }
+  if (typeof value !== 'object' || value === null) return evidence;
+
+  const record = value as Record<string, unknown>;
+  if (typeof record.name === 'string' && 'table' in record) evidence.columns.push(record.name);
+  if ('encoder' in record && 'value' in record) evidence.params.push(record.value);
+  if ('queryChunks' in record) sqlEvidence(record.queryChunks, evidence);
+  return evidence;
+}
+
 describe('ERP repositories', () => {
   it('getProducts aplica projeção, limit e mapeia somente os campos contratados', async () => {
     const fake = limitedFakeDatabase([
@@ -45,8 +59,7 @@ describe('ERP repositories', () => {
       }
     ]);
 
-    const result = await new ProductRepository(fake.db).getProducts({
-      idCompany: 7,
+    const result = await new ProductRepository(fake.db, 7).getProducts({
       itemCode: 'car',
       itemName: 'ro',
       limit: 50
@@ -67,6 +80,10 @@ describe('ERP repositories', () => {
       'price'
     ]);
     expect(fake.limit).toHaveBeenCalledWith(50);
+    expect(sqlEvidence(fake.where.mock.calls[0]?.[0])).toMatchObject({
+      columns: expect.arrayContaining(['IdCompany']),
+      params: expect.arrayContaining([7])
+    });
   });
 
   it('getPriceLists filtra por empresa, limita e reduz a projeção', async () => {
@@ -74,8 +91,7 @@ describe('ERP repositories', () => {
       { idPriceList: 2, code: 'STANDARD', description: 'Tabela padrão' }
     ]);
 
-    const result = await new PriceListRepository(fake.db).getPriceLists({
-      idCompany: 7,
+    const result = await new PriceListRepository(fake.db, 7).getPriceLists({
       limit: 100
     });
 
@@ -88,6 +104,10 @@ describe('ERP repositories', () => {
       'description'
     ]);
     expect(fake.limit).toHaveBeenCalledWith(100);
+    expect(sqlEvidence(fake.where.mock.calls[0]?.[0])).toMatchObject({
+      columns: expect.arrayContaining(['IdCompany']),
+      params: expect.arrayContaining([7])
+    });
   });
 
   it('getProductById retorna somente produto ativo da empresa e limita a um registro', async () => {
@@ -104,8 +124,7 @@ describe('ERP repositories', () => {
     const select = vi.fn().mockReturnValue({ from });
     const db = { select } as unknown as McpDatabase;
 
-    const result = await new ProductRepository(db).getProductById({
-      idCompany: 7,
+    const result = await new ProductRepository(db, 7).getProductById({
       idItem: 10
     });
 
@@ -117,6 +136,10 @@ describe('ERP repositories', () => {
       Price: 100
     });
     expect(limit).toHaveBeenCalledWith(1);
+    expect(sqlEvidence(where.mock.calls[0]?.[0])).toMatchObject({
+      columns: expect.arrayContaining(['IdCompany']),
+      params: expect.arrayContaining([7])
+    });
   });
 
   it('getProductsPriceLists filtra por empresa e item, sem truncar relações', async () => {
@@ -129,8 +152,7 @@ describe('ERP repositories', () => {
     const select = vi.fn().mockReturnValue({ from });
     const db = { select } as unknown as McpDatabase;
 
-    const result = await new ItemPriceRepository(db).getProductsPriceLists({
-      idCompany: 7,
+    const result = await new ItemPriceRepository(db, 7).getProductsPriceLists({
       idItem: 10
     });
 
@@ -146,14 +168,17 @@ describe('ERP repositories', () => {
     expect(limit).not.toHaveBeenCalled();
     expect(orderBy).toHaveBeenCalledTimes(1);
     expect(orderBy.mock.calls[0]).toHaveLength(2);
+    expect(sqlEvidence(where.mock.calls[0]?.[0])).toMatchObject({
+      columns: expect.arrayContaining(['IdCompany']),
+      params: expect.arrayContaining([7])
+    });
   });
 
   it('propaga erros de banco', async () => {
     const fake = limitedFakeDatabase([]);
     fake.limit.mockRejectedValueOnce(new Error('ERP indisponível'));
 
-    await expect(new ProductRepository(fake.db).getProducts({
-      idCompany: 7,
+    await expect(new ProductRepository(fake.db, 7).getProducts({
       limit: 50
     })).rejects.toThrow('ERP indisponível');
   });

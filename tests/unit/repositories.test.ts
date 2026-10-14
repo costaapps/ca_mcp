@@ -8,6 +8,7 @@ interface FakeQuery<T> {
   db: McpDatabase;
   select: ReturnType<typeof vi.fn>;
   from: ReturnType<typeof vi.fn>;
+  innerJoin: ReturnType<typeof vi.fn>;
   where: ReturnType<typeof vi.fn>;
   orderBy: ReturnType<typeof vi.fn>;
   limit: ReturnType<typeof vi.fn>;
@@ -25,18 +26,36 @@ function fakeDatabase<T>(
     return Promise.resolve(sortRows?.([...rows]) ?? rows);
   });
   const where = vi.fn().mockReturnValue({ orderBy });
-  const from = vi.fn().mockReturnValue({ where });
+  const query = { where } as { where: ReturnType<typeof vi.fn>; innerJoin: ReturnType<typeof vi.fn> };
+  const innerJoin = vi.fn().mockImplementation(() => query);
+  query.innerJoin = innerJoin;
+  const from = vi.fn().mockReturnValue(query);
   const select = vi.fn().mockReturnValue({ from });
 
   return {
     db: { select } as unknown as McpDatabase,
     select,
     from,
+    innerJoin,
     where,
     orderBy,
     limit,
     rows
   };
+}
+
+function sqlEvidence(value: unknown, evidence = { columns: [] as string[], params: [] as unknown[] }): typeof evidence {
+  if (Array.isArray(value)) {
+    for (const item of value) sqlEvidence(item, evidence);
+    return evidence;
+  }
+  if (typeof value !== 'object' || value === null) return evidence;
+
+  const record = value as Record<string, unknown>;
+  if (typeof record.name === 'string' && 'table' in record) evidence.columns.push(record.name);
+  if ('encoder' in record && 'value' in record) evidence.params.push(record.value);
+  if ('queryChunks' in record) sqlEvidence(record.queryChunks, evidence);
+  return evidence;
 }
 
 describe('ChatRepository', () => {
@@ -55,7 +74,7 @@ describe('ChatRepository', () => {
     }), true);
 
     const repository = new ChatRepository(fake.db);
-    const result = await repository.getChatHistory(123);
+    const result = await repository.getChatHistory(123, 7);
 
     expect(result).toEqual([
       { Sender: 'System', Text: 'primeira' },
@@ -74,6 +93,13 @@ describe('ChatRepository', () => {
       'dateTimeMessage'
     ]);
     expect(fake.where).toHaveBeenCalledTimes(1);
+    expect(fake.innerJoin).toHaveBeenCalledTimes(2);
+    expect(fake.innerJoin.mock.calls[0]?.[0]).toMatchObject({ idChat: expect.anything() });
+    expect(fake.innerJoin.mock.calls[1]?.[0]).toMatchObject({ idChannel: expect.anything() });
+    expect(sqlEvidence(fake.where.mock.calls[0]?.[0])).toMatchObject({
+      columns: expect.arrayContaining(['IdCompany']),
+      params: expect.arrayContaining([7])
+    });
     expect(fake.orderBy).toHaveBeenCalledTimes(1);
     expect(fake.orderBy.mock.calls[0]).toHaveLength(2);
     expect(fake.limit).toHaveBeenCalledWith(CHAT_HISTORY_LIMIT);
@@ -90,7 +116,7 @@ describe('ChatRepository', () => {
     fake.limit.mockRejectedValueOnce(new Error('db down'));
     const repository = new ChatRepository(fake.db);
 
-    await expect(repository.getChatHistory(123)).rejects.toThrow('db down');
+    await expect(repository.getChatHistory(123, 7)).rejects.toThrow('db down');
   });
 });
 
@@ -140,7 +166,7 @@ describe('FlowRepository', () => {
     }));
 
     const repository = new FlowRepository(fake.db);
-    const result = await repository.getProcessLineFlowState(456);
+    const result = await repository.getProcessLineFlowState(456, 7);
 
     expect(result).toEqual([
       {
@@ -201,6 +227,13 @@ describe('FlowRepository', () => {
       'responseIdMessage'
     ]);
     expect(fake.where).toHaveBeenCalledTimes(1);
+    expect(fake.innerJoin).toHaveBeenCalledTimes(2);
+    expect(fake.innerJoin.mock.calls[0]?.[0]).toMatchObject({ idProcessLine: expect.anything() });
+    expect(fake.innerJoin.mock.calls[1]?.[0]).toMatchObject({ idCompanyModule: expect.anything() });
+    expect(sqlEvidence(fake.where.mock.calls[0]?.[0])).toMatchObject({
+      columns: expect.arrayContaining(['IdCompany']),
+      params: expect.arrayContaining([7])
+    });
     expect(fake.orderBy.mock.calls[0]).toHaveLength(3);
   });
 
@@ -214,6 +247,6 @@ describe('FlowRepository', () => {
   it('retorna lista vazia quando não há registros', async () => {
     const fake = fakeDatabase([]);
     const repository = new FlowRepository(fake.db);
-    await expect(repository.getProcessLineFlowState(999)).resolves.toEqual([]);
+    await expect(repository.getProcessLineFlowState(999, 7)).resolves.toEqual([]);
   });
 });

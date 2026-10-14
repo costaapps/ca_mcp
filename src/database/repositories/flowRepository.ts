@@ -1,6 +1,8 @@
-import { asc, eq } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
 
 import type { McpDatabase } from '../connection.js';
+import { companyModule } from '../schema/companyModule.js';
+import { processLine } from '../schema/processLine.js';
 import { processLineFlow } from '../schema/processLineFlow.js';
 
 export interface ProcessLineFlowStep {
@@ -24,7 +26,7 @@ export interface ProcessLineFlowStep {
 }
 
 export interface FlowRepositoryContract {
-  getProcessLineFlowState(idProcessLine: number): Promise<ProcessLineFlowStep[]>;
+  getProcessLineFlowState(idProcessLine: number, idCompany: number): Promise<ProcessLineFlowStep[]>;
 }
 
 function parseValue(value: string | null): unknown | null {
@@ -49,9 +51,19 @@ function parseLevel(level: string | null): number | null {
 }
 
 export class FlowRepository implements FlowRepositoryContract {
-  public constructor(private readonly db: McpDatabase) {}
+  public constructor(
+    private readonly db: McpDatabase,
+    private readonly boundCompanyId?: number
+  ) {}
 
-  public async getProcessLineFlowState(idProcessLine: number): Promise<ProcessLineFlowStep[]> {
+  public async getProcessLineFlowState(
+    idProcessLine: number,
+    idCompany: number
+  ): Promise<ProcessLineFlowStep[]> {
+    if (this.boundCompanyId !== undefined && this.boundCompanyId !== idCompany) {
+      throw new Error('Flow repository company scope mismatch.');
+    }
+
     const rows = await this.db
       .select({
         idProcessLineFlow: processLineFlow.idProcessLineFlow,
@@ -72,7 +84,12 @@ export class FlowRepository implements FlowRepositoryContract {
         responseIdMessage: processLineFlow.responseIdMessage
       })
       .from(processLineFlow)
-      .where(eq(processLineFlow.idProcessLine, idProcessLine))
+      .innerJoin(processLine, eq(processLineFlow.idProcessLine, processLine.idProcessLine))
+      .innerJoin(companyModule, eq(processLine.idCompanyModule, companyModule.idCompanyModule))
+      .where(and(
+        eq(processLineFlow.idProcessLine, idProcessLine),
+        eq(companyModule.idCompany, idCompany)
+      ))
       .orderBy(
         asc(processLineFlow.level),
         asc(processLineFlow.levelOrder),

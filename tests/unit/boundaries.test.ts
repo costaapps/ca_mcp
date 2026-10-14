@@ -39,14 +39,14 @@ describe('PoC MCP boundaries', () => {
 
     expect(chatRepository).toContain('eq(message.idChat, idChat)');
     expect(flowRepository).toContain('eq(processLineFlow.idProcessLine, idProcessLine)');
-    expect(erpRepositories).toContain("eq(erpItem.idCompany, search.idCompany)");
-    expect(erpRepositories).toContain("eq(erpPriceList.idCompany, search.idCompany)");
+    expect(erpRepositories).toContain("eq(erpItem.idCompany, this.idCompany)");
+    expect(erpRepositories).toContain("eq(erpPriceList.idCompany, this.idCompany)");
     expect(erpRepositories).toContain("eq(erpItemPrice.idItem, search.idItem)");
     expect(erpRepositories).not.toContain('sql.raw');
     expect(tools).not.toMatch(/\bSELECT\b|\bINSERT\b|\bUPDATE\b|\bDELETE\b/i);
   });
 
-  it('mantém as Flow tools atrás do CoreFlowClient e fora do banco', () => {
+  it('mantém as Flow tools atrás do client resolvido por tenant e fora do banco', () => {
     const flowTools = [
       'listFlowActions.ts',
       'describeFlowAction.ts',
@@ -57,17 +57,18 @@ describe('PoC MCP boundaries', () => {
     )).join('\n');
     const server = readFileSync(resolve(process.cwd(), 'src/mcp/server.ts'), 'utf8');
 
-    expect(flowTools).toContain("CoreFlowClientContract");
+    expect(flowTools).toContain('tenant.getCoreFlowClient()');
     expect(flowTools).not.toMatch(/database\/|Repository|processLineFlow|FlowRepository/);
     expect(flowTools).not.toContain('fetch(');
     expect(readFileSync(resolve(process.cwd(), 'src/core/CoreFlowClient.ts'), 'utf8')).toContain('fetchFn');
-    expect(server).toContain('coreFlowClient: CoreFlowClientContract');
+    expect(server).toContain('tenantContextProvider: TenantContextProvider');
+    expect(server).not.toContain('coreFlowClient:');
     expect(server).toContain('registerListFlowActionsTool');
     expect(server).toContain('registerDescribeFlowActionTool');
     expect(server).toContain('registerExecuteFlowActionTool');
   });
 
-  it('mantém as Navigation tools atrás do CoreNavigationClient e sem IDs técnicos', () => {
+  it('mantém as Navigation tools atrás do client resolvido por tenant e sem IDs técnicos', () => {
     const navigationTools = [
       'listNavigationDestinations.ts',
       'requestHandoff.ts'
@@ -77,11 +78,12 @@ describe('PoC MCP boundaries', () => {
     )).join('\n');
     const server = readFileSync(resolve(process.cwd(), 'src/mcp/server.ts'), 'utf8');
 
-    expect(navigationTools).toContain('CoreNavigationClientContract');
+    expect(navigationTools).toContain('tenant.getCoreNavigationClient()');
     expect(navigationTools).not.toMatch(/database\/|Repository|CompanyMenu|ProcessLine/);
     expect(navigationTools).not.toContain('fetch(');
     expect(readFileSync(resolve(process.cwd(), 'src/core/CoreNavigationClient.ts'), 'utf8')).toContain('fetchFn');
-    expect(server).toContain('coreNavigationClient: CoreNavigationClientContract');
+    expect(server).toContain('tenantContextProvider: TenantContextProvider');
+    expect(server).not.toContain('coreNavigationClient:');
     expect(server).toContain('registerListNavigationDestinationsTool');
     expect(server).toContain('registerRequestHandoffTool');
     expect(navigationTools).not.toContain('IdCompanyMenu');

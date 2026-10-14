@@ -12,6 +12,7 @@ import type { ItemPriceRepositoryContract } from '../../src/database/repositorie
 import type { CoreFlowClientContract } from '../../src/core/contracts.js';
 import type { CoreNavigationClientContract } from '../../src/core/contracts.js';
 import type { McpLogger } from '../../src/mcp/logger.js';
+import { addTenantUUID, createTenantFixture } from '../fixtures/tenantContext.js';
 
 function listen(server: Server): Promise<number> {
   return new Promise((resolve) => {
@@ -25,6 +26,13 @@ function listen(server: Server): Promise<number> {
 
 function close(server: Server): Promise<void> {
   return new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+}
+
+function callTenantTool(
+  client: Client,
+  request: { name: string; arguments?: Record<string, unknown>; _meta?: unknown }
+) {
+  return client.callTool({ ...request, _meta: addTenantUUID(request._meta) } as never);
 }
 
 describe('MCP HTTP server', () => {
@@ -175,14 +183,18 @@ describe('MCP HTTP server', () => {
       serverError: vi.fn()
     };
 
-    server = createServer(createApp({
+    const tenantFixture = createTenantFixture({
       chatRepository,
       flowRepository,
       productRepository,
       priceListRepository,
       itemPriceRepository,
       coreFlowClient,
-      coreNavigationClient,
+      coreNavigationClient
+    });
+    server = createServer(createApp({
+      tenantContextProvider: tenantFixture.provider,
+      isReady: async () => true,
       logger
     }));
     const port = await listen(server);
@@ -219,7 +231,7 @@ describe('MCP HTTP server', () => {
   });
 
   it('executa get_chat_history com contexto, structuredContent e somente IdChat', async () => {
-    const result = await client.callTool({
+    const result = await callTenantTool(client, {
       name: 'get_chat_history',
       arguments: {},
       _meta: { ca: { Execution: { IdChat: 123, IdProcessLine: 456 } } }
@@ -232,12 +244,12 @@ describe('MCP HTTP server', () => {
         { Sender: 'Customer', Text: 'Quero comprar um carro.' }
       ]
     });
-    expect(chatRepository.getChatHistory).toHaveBeenCalledWith(123);
+    expect(chatRepository.getChatHistory).toHaveBeenCalledWith(123, 1003);
     expect(flowRepository.getProcessLineFlowState).not.toHaveBeenCalled();
   });
 
   it('executa get_process_line_flow_state com contexto e somente IdProcessLine', async () => {
-    const result = await client.callTool({
+    const result = await callTenantTool(client, {
       name: 'get_process_line_flow_state',
       arguments: {},
       _meta: { ca: { Execution: { IdChat: 123, IdProcessLine: 456 } } }
@@ -267,12 +279,12 @@ describe('MCP HTTP server', () => {
         }
       ]
     });
-    expect(flowRepository.getProcessLineFlowState).toHaveBeenCalledWith(456);
+    expect(flowRepository.getProcessLineFlowState).toHaveBeenCalledWith(456, 1003);
     expect(chatRepository.getChatHistory).not.toHaveBeenCalled();
   });
 
   it('retorna erro MCP estruturado quando falta o contexto obrigatório', async () => {
-    const result = await client.callTool({
+    const result = await callTenantTool(client, {
       name: 'get_chat_history',
       arguments: {}
     });
@@ -286,7 +298,7 @@ describe('MCP HTTP server', () => {
   });
 
   it('exige Execution.IdProcessLine para get_process_line_flow_state', async () => {
-    const result = await client.callTool({
+    const result = await callTenantTool(client, {
       name: 'get_process_line_flow_state',
       arguments: {},
       _meta: { ca: { Execution: { IdChat: 123 } } }
@@ -303,7 +315,7 @@ describe('MCP HTTP server', () => {
   it('retorna DATABASE_ERROR sem expor stack quando o repository falha', async () => {
     vi.mocked(chatRepository.getChatHistory).mockRejectedValueOnce(new Error('segredo do banco'));
 
-    const result = await client.callTool({
+    const result = await callTenantTool(client, {
       name: 'get_chat_history',
       arguments: {},
       _meta: { ca: { Execution: { IdChat: 123 } } }
@@ -318,7 +330,7 @@ describe('MCP HTTP server', () => {
   });
 
   it('executa get_products com IdCompany, filtros funcionais e structuredContent enxuto', async () => {
-    const result = await client.callTool({
+    const result = await callTenantTool(client, {
       name: 'get_products',
       arguments: { ItemCode: 'car', ItemName: 'carro', Limit: 20 },
       _meta: { ca: { Execution: { IdCompany: 1003, IdChat: 123 } } }
@@ -336,7 +348,6 @@ describe('MCP HTTP server', () => {
     });
     expect(result._meta).toBeUndefined();
     expect(productRepository.getProducts).toHaveBeenCalledWith({
-      idCompany: 1003,
       itemCode: 'car',
       itemName: 'carro',
       limit: 20
@@ -345,8 +356,8 @@ describe('MCP HTTP server', () => {
     expect(flowRepository.getProcessLineFlowState).not.toHaveBeenCalled();
   });
 
-  it('aplica limite padrão em get_products e exige Execution.IdCompany', async () => {
-    const result = await client.callTool({
+  it('aplica limite padrão em get_products e exige IdCompany do contrato', async () => {
+    const result = await callTenantTool(client, {
       name: 'get_products',
       arguments: {},
       _meta: { ca: { Execution: { IdCompany: 1003 } } }
@@ -354,25 +365,36 @@ describe('MCP HTTP server', () => {
 
     expect(result.isError).not.toBe(true);
     expect(productRepository.getProducts).toHaveBeenCalledWith({
-      idCompany: 1003,
       itemCode: undefined,
       itemName: undefined,
       limit: 50
     });
 
-    const missingContext = await client.callTool({
+    const missingCompanyUUID = await client.callTool({
       name: 'get_products',
       arguments: {}
     });
-    expect(missingContext.isError).toBe(true);
-    expect(missingContext.structuredContent).toEqual({
+    expect(missingCompanyUUID.isError).toBe(true);
+    expect(missingCompanyUUID.structuredContent).toEqual({
+      Code: 'MISSING_CONTEXT',
+      Required: 'Execution.CompanyUUID'
+    });
+
+    const withoutIdCompany = await callTenantTool(client, {
+      name: 'get_products',
+      arguments: {},
+      _meta: { ca: { Execution: {} } }
+    });
+    expect(withoutIdCompany.isError).toBe(true);
+    expect(withoutIdCompany.structuredContent).toEqual({
       Code: 'MISSING_CONTEXT',
       Required: 'Execution.IdCompany'
     });
+    expect(productRepository.getProducts).toHaveBeenCalledTimes(1);
   });
 
-  it('executa get_pricelists somente com Execution.IdCompany', async () => {
-    const result = await client.callTool({
+  it('executa get_pricelists com contexto de empresa resolvido', async () => {
+    const result = await callTenantTool(client, {
       name: 'get_pricelists',
       arguments: { Limit: 10 },
       _meta: { ca: { Execution: { IdCompany: 1003, IdItem: 999 } } }
@@ -383,14 +405,39 @@ describe('MCP HTTP server', () => {
       PriceLists: [{ IdPriceList: 20, Code: 'STANDARD', Description: 'Tabela padrão' }]
     });
     expect(priceListRepository.getPriceLists).toHaveBeenCalledWith({
-      idCompany: 1003,
       limit: 10
     });
     expect(itemPriceRepository.getProductsPriceLists).not.toHaveBeenCalled();
   });
 
-  it('executa get_products_pricelists com Execution.IdCompany e Resolved.IdItem', async () => {
-    const result = await client.callTool({
+  it.each([
+    {
+      name: 'get_pricelists',
+      arguments: {},
+      structuredContent: { PriceLists: [{ IdPriceList: 20, Code: 'STANDARD', Description: 'Tabela padrão' }] }
+    },
+    {
+      name: 'get_products_pricelists',
+      arguments: {},
+      resolved: { IdItem: 10 },
+      structuredContent: { ProductsPriceLists: [{ IdItemPrice: 30, IdItem: 10, IdPriceList: 20, Price: 95 }] }
+    }
+  ])('$name exige IdCompany do contrato existente', async ({ name, arguments: args, resolved }) => {
+    const result = await callTenantTool(client, {
+      name,
+      arguments: args,
+      _meta: { ca: { Execution: {}, ...(resolved === undefined ? {} : { Resolved: resolved }) } }
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toEqual({
+      Code: 'MISSING_CONTEXT',
+      Required: 'Execution.IdCompany'
+    });
+  });
+
+  it('executa get_products_pricelists com Resolved.IdItem e contexto de empresa resolvido', async () => {
+    const result = await callTenantTool(client, {
       name: 'get_products_pricelists',
       arguments: {},
       _meta: { ca: { Execution: { IdCompany: 1003, IdChat: 123 }, Resolved: { IdItem: 10 } } }
@@ -401,14 +448,13 @@ describe('MCP HTTP server', () => {
       ProductsPriceLists: [{ IdItemPrice: 30, IdItem: 10, IdPriceList: 20, Price: 95 }]
     });
     expect(itemPriceRepository.getProductsPriceLists).toHaveBeenCalledWith({
-      idCompany: 1003,
       idItem: 10
     });
     expect(productRepository.getProducts).not.toHaveBeenCalled();
   });
 
   it('exige Resolved.IdItem para get_products_pricelists', async () => {
-    const result = await client.callTool({
+    const result = await callTenantTool(client, {
       name: 'get_products_pricelists',
       arguments: {},
       _meta: { ca: { Execution: { IdCompany: 1003 } } }
@@ -425,7 +471,7 @@ describe('MCP HTTP server', () => {
   it('retorna DATABASE_ERROR para falha nas consultas ERP', async () => {
     vi.mocked(priceListRepository.getPriceLists).mockRejectedValueOnce(new Error('erro ERP'));
 
-    const result = await client.callTool({
+    const result = await callTenantTool(client, {
       name: 'get_pricelists',
       arguments: {},
       _meta: { ca: { Execution: { IdCompany: 1003 } } }
@@ -437,7 +483,7 @@ describe('MCP HTTP server', () => {
   });
 
   it('resolve_product confirma o item e publica Resolved.IdItem', async () => {
-    const result = await client.callTool({
+    const result = await callTenantTool(client, {
       name: 'resolve_product',
       arguments: { IdItem: 10 },
       _meta: { ca: { Execution: { IdCompany: 1003, IdChat: 123 } } }
@@ -455,25 +501,35 @@ describe('MCP HTTP server', () => {
     });
     expect(result._meta).toEqual({ ca: { Resolved: { IdItem: 10 } } });
     expect(productRepository.getProductById).toHaveBeenCalledWith({
-      idCompany: 1003,
       idItem: 10
     });
   });
 
-  it('resolve_product exige empresa e não resolve produto inexistente', async () => {
-    const missingCompany = await client.callTool({
+  it('resolve_product exige CompanyUUID e IdCompany do contrato existente', async () => {
+    const missingCompanyUUID = await client.callTool({
       name: 'resolve_product',
       arguments: { IdItem: 10 }
     });
-    expect(missingCompany.isError).toBe(true);
-    expect(missingCompany.structuredContent).toEqual({
+    expect(missingCompanyUUID.isError).toBe(true);
+    expect(missingCompanyUUID.structuredContent).toEqual({
+      Code: 'MISSING_CONTEXT',
+      Required: 'Execution.CompanyUUID'
+    });
+
+    const withoutIdCompany = await callTenantTool(client, {
+      name: 'resolve_product',
+      arguments: { IdItem: 10 },
+      _meta: { ca: { Execution: {} } }
+    });
+    expect(withoutIdCompany.isError).toBe(true);
+    expect(withoutIdCompany.structuredContent).toEqual({
       Code: 'MISSING_CONTEXT',
       Required: 'Execution.IdCompany'
     });
     expect(productRepository.getProductById).not.toHaveBeenCalled();
 
     vi.mocked(productRepository.getProductById).mockResolvedValueOnce(null);
-    const notFound = await client.callTool({
+    const notFound = await callTenantTool(client, {
       name: 'resolve_product',
       arguments: { IdItem: 999 },
       _meta: { ca: { Execution: { IdCompany: 1003 } } }
@@ -481,10 +537,11 @@ describe('MCP HTTP server', () => {
     expect(notFound.isError).toBe(true);
     expect(notFound.structuredContent).toEqual({ Code: 'PRODUCT_NOT_FOUND' });
     expect(notFound._meta).toBeUndefined();
+    expect(productRepository.getProductById).toHaveBeenCalledWith({ idItem: 999 });
   });
 
   it('rejeita IdItem inválido em resolve_product', async () => {
-    const result = await client.callTool({
+    const result = await callTenantTool(client, {
       name: 'resolve_product',
       arguments: { IdItem: 0 },
       _meta: { ca: { Execution: { IdCompany: 1003 } } }
@@ -495,7 +552,7 @@ describe('MCP HTTP server', () => {
   });
 
   it('integra list_flow_actions com o Core usando apenas Execution', async () => {
-    const result = await client.callTool({
+    const result = await callTenantTool(client, {
       name: 'list_flow_actions',
       arguments: {},
       _meta: {
@@ -523,8 +580,35 @@ describe('MCP HTTP server', () => {
     expect(flowRepository.getProcessLineFlowState).not.toHaveBeenCalled();
   });
 
+  it('exige CompanyUUID e IdCompany do contrato para Flow tools', async () => {
+    const missingCompanyUUID = await client.callTool({
+      name: 'list_flow_actions',
+      arguments: {}
+    });
+    expect(missingCompanyUUID.isError).toBe(true);
+    expect(missingCompanyUUID.structuredContent).toEqual({
+      Code: 'MISSING_CONTEXT',
+      Required: 'Execution.CompanyUUID'
+    });
+
+    const withoutIdCompany = await client.callTool({
+      name: 'list_flow_actions',
+      arguments: {},
+      _meta: addTenantUUID({ ca: { Execution: {
+        ExecutionUUID: 'execution-1',
+        IdProcessLine: 456
+      } } })
+    });
+    expect(withoutIdCompany.isError).toBe(true);
+    expect(withoutIdCompany.structuredContent).toEqual({
+      Code: 'MISSING_CONTEXT',
+      Required: 'Execution.IdCompany'
+    });
+    expect(coreFlowClient.listFlowActions).not.toHaveBeenCalled();
+  });
+
   it('integra describe_flow_action e mantém Available=false como sucesso', async () => {
-    const result = await client.callTool({
+    const result = await callTenantTool(client, {
       name: 'describe_flow_action',
       arguments: { Action: 'get_customer_details' },
       _meta: { ca: { Execution: {
@@ -555,7 +639,7 @@ describe('MCP HTTP server', () => {
 
   it('integra execute_flow_action, gera RequestUUID e oculta FlowInvocation no conteúdo', async () => {
     const requestUUID = 'request-1';
-    const result = await client.callTool({
+    const result = await callTenantTool(client, {
       name: 'execute_flow_action',
       arguments: {
         Action: 'get_customer_details',
@@ -608,7 +692,7 @@ describe('MCP HTTP server', () => {
       }
     });
 
-    const result = await client.callTool({
+    const result = await callTenantTool(client, {
       name: 'execute_flow_action',
       arguments: { Action: 'get_customer_details', Input: {} },
       _meta: { ca: { Execution: {
@@ -634,7 +718,7 @@ describe('MCP HTTP server', () => {
   });
 
   it('integra list_navigation_destinations com MENU/HOME e contexto confiável', async () => {
-    const result = await client.callTool({
+    const result = await callTenantTool(client, {
       name: 'list_navigation_destinations',
       arguments: {},
       _meta: { ca: { Execution: {
@@ -672,8 +756,36 @@ describe('MCP HTTP server', () => {
     });
   });
 
+  it('exige CompanyUUID e IdCompany do contrato para navegação', async () => {
+    const missingCompanyUUID = await client.callTool({
+      name: 'list_navigation_destinations',
+      arguments: {}
+    });
+    expect(missingCompanyUUID.isError).toBe(true);
+    expect(missingCompanyUUID.structuredContent).toEqual({
+      Code: 'MISSING_CONTEXT',
+      Required: 'Execution.CompanyUUID'
+    });
+
+    const withoutIdCompany = await client.callTool({
+      name: 'list_navigation_destinations',
+      arguments: {},
+      _meta: addTenantUUID({ ca: { Execution: {
+        ExecutionUUID: 'execution-1',
+        TurnUUID: 'turn-1',
+        IdProcessLine: 456
+      } } })
+    });
+    expect(withoutIdCompany.isError).toBe(true);
+    expect(withoutIdCompany.structuredContent).toEqual({
+      Code: 'MISSING_CONTEXT',
+      Required: 'Execution.IdCompany'
+    });
+    expect(coreNavigationClient.listNavigationDestinations).not.toHaveBeenCalled();
+  });
+
   it('integra request_handoff, gera RequestUUID e não expõe HandoffUUID', async () => {
-    const result = await client.callTool({
+    const result = await callTenantTool(client, {
       name: 'request_handoff',
       arguments: {
         DestinationRef: 'nav_sales_opaque',
@@ -723,7 +835,7 @@ describe('MCP HTTP server', () => {
       }
     });
 
-    const failedHandoff = await client.callTool({
+    const failedHandoff = await callTenantTool(client, {
       name: 'request_handoff',
       arguments: {
         DestinationRef: 'nav_sales_opaque',
@@ -745,7 +857,7 @@ describe('MCP HTTP server', () => {
       { type: 'text', text: 'O destino não está mais disponível.' }
     ]);
 
-    const flowResult = await client.callTool({
+    const flowResult = await callTenantTool(client, {
       name: 'list_flow_actions',
       arguments: {},
       _meta: { ca: { Execution: {
