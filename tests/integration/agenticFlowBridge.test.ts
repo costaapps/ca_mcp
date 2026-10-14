@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { createApp } from '../../src/app.js';
 import { CoreFlowClient } from '../../src/core/CoreFlowClient.js';
+import { createTenantFixture, TEST_COMPANY_UUID } from '../fixtures/tenantContext.js';
 
 function listen(server: Server): Promise<number> {
   return new Promise((resolve) => server.listen(0, '127.0.0.1', () => {
@@ -97,14 +98,18 @@ describe('ponte HTTP MCP → Core para capabilities Agentic', () => {
       const corePort = await listen(core);
       const coreFlowClient = new CoreFlowClient({ baseUrl: `http://127.0.0.1:${corePort}`, timeoutMs: 1000 });
       const unavailable = vi.fn().mockRejectedValue(new Error('não deve ser chamado'));
-      mcp = createServer(createApp({
+      const tenantFixture = createTenantFixture({
         chatRepository: { getChatHistory: unavailable },
         flowRepository: { getProcessLineFlowState: unavailable },
         productRepository: { getProducts: unavailable, getProductById: unavailable },
         priceListRepository: { getPriceLists: unavailable },
         itemPriceRepository: { getProductsPriceLists: unavailable },
         coreFlowClient,
-        coreNavigationClient: { listNavigationDestinations: unavailable, requestHandoff: unavailable },
+        coreNavigationClient: { listNavigationDestinations: unavailable, requestHandoff: unavailable }
+      });
+      mcp = createServer(createApp({
+        tenantContextProvider: tenantFixture.provider,
+        isReady: async () => true,
         logger: { toolCompleted: vi.fn(), serverError: vi.fn() }
       }));
       const mcpPort = await listen(mcp);
@@ -124,6 +129,7 @@ describe('ponte HTTP MCP → Core para capabilities Agentic', () => {
       });
 
       const _meta = { ca: { Execution: {
+        CompanyUUID: TEST_COMPANY_UUID,
         ExecutionUUID: 'execution-1', TurnUUID: 'turn-1', IdCompany: 1003, IdProcessLine: 456
       } } };
       const list = await client.callTool({ name: 'list_flow_actions', arguments: {}, _meta });

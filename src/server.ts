@@ -4,31 +4,13 @@ import { createServer } from 'node:http';
 
 import { createApp } from './app.js';
 import { loadEnv } from './config/env.js';
-import { createDatabase } from './database/connection.js';
-import { ChatRepository } from './database/repositories/chatRepository.js';
-import { FlowRepository } from './database/repositories/flowRepository.js';
-import { ProductRepository } from './database/repositories/productRepository.js';
-import { PriceListRepository } from './database/repositories/priceListRepository.js';
-import { ItemPriceRepository } from './database/repositories/itemPriceRepository.js';
-import { CoreFlowClient } from './core/CoreFlowClient.js';
-import { CoreNavigationClient } from './core/CoreNavigationClient.js';
+import { createTenantRuntime } from './tenancy/tenantRuntime.js';
 
 const config = loadEnv();
-const database = createDatabase(config.db);
+const runtime = createTenantRuntime(config);
 const app = createApp({
-  chatRepository: new ChatRepository(database.db),
-  flowRepository: new FlowRepository(database.db),
-  productRepository: new ProductRepository(database.db),
-  priceListRepository: new PriceListRepository(database.db),
-  itemPriceRepository: new ItemPriceRepository(database.db),
-  coreFlowClient: new CoreFlowClient({
-    baseUrl: config.coreApiUrl,
-    timeoutMs: config.coreApiTimeoutMs
-  }),
-  coreNavigationClient: new CoreNavigationClient({
-    baseUrl: config.coreApiUrl,
-    timeoutMs: config.coreApiTimeoutMs
-  })
+  tenantContextProvider: runtime.provider,
+  isReady: runtime.isReady
 });
 const server = createServer(app);
 
@@ -42,18 +24,48 @@ server.listen(config.port, '0.0.0.0', () => {
 
 let shuttingDown = false;
 
+async function closeHttpServer(timeoutMs: number): Promise<void> {
+  await new Promise<void>((resolve) => {
+    let completed = false;
+    const finish = () => {
+      if (completed) return;
+      completed = true;
+      clearTimeout(timeout);
+      resolve();
+    };
+
+    const timeout = setTimeout(() => {
+      server.closeAllConnections();
+      finish();
+    }, timeoutMs);
+    timeout.unref();
+
+    server.close(() => finish());
+  });
+}
+
 async function shutdown(signal: string): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
+  const deadline = Date.now() + config.mcpShutdownTimeoutMs;
+  runtime.beginDrain();
   console.info(JSON.stringify({ type: 'server_shutdown', signal }));
 
-  await new Promise<void>((resolve) => server.close(() => resolve()));
-  await database.close();
+  await Promise.all([
+    closeHttpServer(Math.max(0, deadline - Date.now())),
+    runtime.close(Math.max(0, deadline - Date.now()))
+  ]);
 }
 
-process.once('SIGINT', () => {
-  void shutdown('SIGINT').finally(() => process.exit(0));
-});
-process.once('SIGTERM', () => {
-  void shutdown('SIGTERM').finally(() => process.exit(0));
-});
+function handleSignal(signal: string): void {
+  void shutdown(signal).then(
+    () => process.exit(0),
+    () => {
+      console.error(JSON.stringify({ type: 'server_shutdown_failed', signal }));
+      process.exit(1);
+    }
+  );
+}
+
+process.once('SIGINT', () => handleSignal('SIGINT'));
+process.once('SIGTERM', () => handleSignal('SIGTERM'));

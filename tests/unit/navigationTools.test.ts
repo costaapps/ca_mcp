@@ -8,13 +8,14 @@ import { registerRequestHandoffTool, requestHandoffInputSchema } from '../../src
 import { McpToolError } from '../../src/errors/McpToolError.js';
 import type { McpLogger } from '../../src/mcp/logger.js';
 import { navigationDestinationsWithAIReference } from '../fixtures/coreNavigationContracts.js';
+import { addTenantUUID, createTenantFixture } from '../fixtures/tenantContext.js';
 
 function contextWithMeta(meta: unknown): ServerContext {
   return {
     mcpReq: {
       id: 1,
       method: 'tools/call',
-      _meta: meta as never,
+      _meta: addTenantUUID(meta) as never,
       requestState: (() => undefined) as ServerContext['mcpReq']['requestState'],
       signal: new AbortController().signal
     } as unknown as ServerContext['mcpReq']
@@ -45,12 +46,25 @@ function coreClient(overrides: Partial<CoreNavigationClientContract> = {}): Core
   };
 }
 
+function toolDependencies(
+  coreNavigationClient: CoreNavigationClientContract,
+  log: McpLogger,
+  requestUUID?: () => string
+) {
+  return {
+    tenantContextProvider: createTenantFixture({ coreNavigationClient }).provider,
+    logger: log,
+    ...(requestUUID === undefined ? {} : { requestUUID })
+  };
+}
+
 const executionMeta = {
   ca: {
     Execution: {
       ExecutionUUID: 'execution-1',
       TurnUUID: 'turn-1',
       IdCompany: 1003,
+      IdDatabase: 22,
       IdProcessLine: 456,
       IdCompanyModule: 999
     }
@@ -82,10 +96,8 @@ describe('Navigation MCP tools', () => {
       }
     });
     const log = logger();
-    const callback = captureCallback((server) => registerListNavigationDestinationsTool(server, {
-      coreNavigationClient: coreClient({ listNavigationDestinations }),
-      logger: log
-    }));
+    const callback = captureCallback((server) => registerListNavigationDestinationsTool(server,
+      toolDependencies(coreClient({ listNavigationDestinations }), log)));
 
     const result = await callback({}, contextWithMeta(executionMeta));
 
@@ -135,10 +147,8 @@ describe('Navigation MCP tools', () => {
       navigationDestinationsWithAIReference
     );
     const log = logger();
-    const callback = captureCallback((server) => registerListNavigationDestinationsTool(server, {
-      coreNavigationClient: coreClient({ listNavigationDestinations }),
-      logger: log
-    }));
+    const callback = captureCallback((server) => registerListNavigationDestinationsTool(server,
+      toolDependencies(coreClient({ listNavigationDestinations }), log)));
 
     const result = await callback({}, contextWithMeta(executionMeta));
 
@@ -163,10 +173,8 @@ describe('Navigation MCP tools', () => {
 
   it('list_navigation_destinations exige todo o contexto confiável e não consulta Core sem ele', async () => {
     const listNavigationDestinations = vi.fn();
-    const callback = captureCallback((server) => registerListNavigationDestinationsTool(server, {
-      coreNavigationClient: coreClient({ listNavigationDestinations }),
-      logger: logger()
-    }));
+    const callback = captureCallback((server) => registerListNavigationDestinationsTool(server,
+      toolDependencies(coreClient({ listNavigationDestinations }), logger())));
 
     const result = await callback({}, contextWithMeta({
       ca: { Execution: { ExecutionUUID: 'execution-1', IdCompany: 1003, IdProcessLine: 456 } }
@@ -192,11 +200,8 @@ describe('Navigation MCP tools', () => {
       }
     });
     const log = logger();
-    const callback = captureCallback((server) => registerRequestHandoffTool(server, {
-      coreNavigationClient: coreClient({ requestHandoff }),
-      logger: log,
-      requestUUID: () => 'request-1'
-    }));
+    const callback = captureCallback((server) => registerRequestHandoffTool(server,
+      toolDependencies(coreClient({ requestHandoff }), log, () => 'request-1')));
 
     const opaqueDestinationRef = '7fM%2FQ+opaque::A9';
     const result = await callback({
@@ -233,11 +238,8 @@ describe('Navigation MCP tools', () => {
     const requestHandoff = vi.fn().mockRejectedValue(
       new McpToolError('CORE_TIMEOUT', 'O Core excedeu o tempo limite para responder.')
     );
-    const callback = captureCallback((server) => registerRequestHandoffTool(server, {
-      coreNavigationClient: coreClient({ requestHandoff }),
-      logger: logger(),
-      requestUUID: () => 'request-1'
-    }));
+    const callback = captureCallback((server) => registerRequestHandoffTool(server,
+      toolDependencies(coreClient({ requestHandoff }), logger(), () => 'request-1')));
 
     const result = await callback({
       DestinationRef: 'random-opaque-reference',
@@ -253,11 +255,8 @@ describe('Navigation MCP tools', () => {
 
   it('request_handoff exige DestinationRef e não aceita IDs técnicos como roteamento', async () => {
     const requestHandoff = vi.fn();
-    const callback = captureCallback((server) => registerRequestHandoffTool(server, {
-      coreNavigationClient: coreClient({ requestHandoff }),
-      logger: logger(),
-      requestUUID: () => 'request-1'
-    }));
+    const callback = captureCallback((server) => registerRequestHandoffTool(server,
+      toolDependencies(coreClient({ requestHandoff }), logger(), () => 'request-1')));
 
     const missingDestination = await callback({
       Reason: 'Navegação',
@@ -289,11 +288,8 @@ describe('Navigation MCP tools', () => {
         Message: 'O destino não está mais disponível.'
       }
     });
-    const callback = captureCallback((server) => registerRequestHandoffTool(server, {
-      coreNavigationClient: coreClient({ requestHandoff }),
-      logger: logger(),
-      requestUUID: () => 'request-1'
-    }));
+    const callback = captureCallback((server) => registerRequestHandoffTool(server,
+      toolDependencies(coreClient({ requestHandoff }), logger(), () => 'request-1')));
 
     const businessFailure = await callback({
       DestinationRef: 'nav_opaque',
@@ -312,7 +308,7 @@ describe('Navigation MCP tools', () => {
       DestinationRef: 'nav_opaque',
       Reason: 'Navegação',
       Summary: 'Solicitação.'
-    }, contextWithMeta(undefined));
+    }, contextWithMeta({ ca: { Execution: { IdCompany: 1003 } } }));
     expect(missingContext.isError).toBe(true);
     expect(missingContext.structuredContent).toEqual({
       Code: 'MISSING_CONTEXT',
@@ -335,10 +331,8 @@ describe('Navigation MCP tools', () => {
         }]
       }
     });
-    const callback = captureCallback((server) => registerListNavigationDestinationsTool(server, {
-      coreNavigationClient: coreClient({ listNavigationDestinations }),
-      logger: logger()
-    }));
+    const callback = captureCallback((server) => registerListNavigationDestinationsTool(server,
+      toolDependencies(coreClient({ listNavigationDestinations }), logger())));
 
     const result = await callback({}, contextWithMeta(executionMeta));
     expect(result.isError).toBe(true);
@@ -356,11 +350,8 @@ describe('Navigation MCP tools', () => {
         HandoffUUID: 'handoff-1'
       }
     });
-    const callback = captureCallback((server) => registerRequestHandoffTool(server, {
-      coreNavigationClient: coreClient({ requestHandoff }),
-      logger: logger(),
-      requestUUID: () => 'request-1'
-    }));
+    const callback = captureCallback((server) => registerRequestHandoffTool(server,
+      toolDependencies(coreClient({ requestHandoff }), logger(), () => 'request-1')));
 
     const result = await callback({
       DestinationRef: 'random-opaque-reference',

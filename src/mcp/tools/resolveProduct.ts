@@ -1,11 +1,13 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
 
-import type { ProductRepositoryContract } from '../../database/repositories/productRepository.js';
+import type { TenantContextProvider, TenantIdentity } from '../../tenancy/contracts.js';
 import { ERROR_CODES } from '../../errors/errorCodes.js';
 import { McpToolError } from '../../errors/McpToolError.js';
 import { extractCAMeta } from '../context/caMeta.js';
-import { requireExecutionId } from '../context/requireContext.js';
+import type { CAMeta } from '../context/caMeta.js';
+import { getToolLogContext } from '../context/toolLogContext.js';
+import { withRequiredTenantContext } from '../context/requireContext.js';
 import type { McpLogger } from '../logger.js';
 import { toToolErrorResult, withResolvedMeta } from '../result.js';
 import { productOutputSchema } from './getProducts.js';
@@ -21,7 +23,7 @@ export const resolveProductOutputSchema = z.object({
 const TOOL_NAME = 'resolve_product';
 
 export interface ResolveProductToolDependencies {
-  productRepository: ProductRepositoryContract;
+  tenantContextProvider: TenantContextProvider;
   logger: McpLogger;
 }
 
@@ -38,40 +40,45 @@ export function registerResolveProductTool(
     },
     async (arguments_, ctx) => {
       const startedAt = Date.now();
+      let meta: CAMeta | undefined;
+      let tenantIdentity: TenantIdentity | undefined;
 
       try {
-        const parsedArguments = resolveProductInputSchema.safeParse(arguments_);
-        if (!parsedArguments.success) {
-          throw new McpToolError(ERROR_CODES.INVALID_ARGUMENTS, 'Argumentos inválidos para confirmação do produto.');
-        }
+        const operationMeta = extractCAMeta(ctx);
+        meta = operationMeta;
+        return await withRequiredTenantContext(dependencies.tenantContextProvider, operationMeta, async (tenant) => {
+          tenantIdentity = tenant.identity;
+          const parsedArguments = resolveProductInputSchema.safeParse(arguments_);
+          if (!parsedArguments.success) {
+            throw new McpToolError(ERROR_CODES.INVALID_ARGUMENTS, 'Argumentos inválidos para confirmação do produto.');
+          }
 
-        const meta = extractCAMeta(ctx);
-        const idCompany = requireExecutionId(meta, 'IdCompany');
-        const product = await dependencies.productRepository.getProductById({
-          idCompany,
-          idItem: parsedArguments.data.IdItem
+          const product = await tenant.productRepository.getProductById({
+            idItem: parsedArguments.data.IdItem
+          });
+
+          if (product === null) {
+            throw new McpToolError(
+              ERROR_CODES.PRODUCT_NOT_FOUND,
+              'Produto não encontrado para a empresa atual.'
+            );
+          }
+
+          const structuredContent = resolveProductOutputSchema.parse({ Product: product });
+          const result = {
+            content: [{ type: 'text' as const, text: 'Produto confirmado com sucesso.' }],
+            structuredContent
+          };
+
+          dependencies.logger.toolCompleted({
+            tool: TOOL_NAME,
+            durationMs: Date.now() - startedAt,
+            success: true,
+            ...getToolLogContext(operationMeta, tenant.identity)
+          });
+
+          return withResolvedMeta(result, { IdItem: product.IdItem });
         });
-
-        if (product === null) {
-          throw new McpToolError(
-            ERROR_CODES.PRODUCT_NOT_FOUND,
-            'Produto não encontrado para a empresa atual.'
-          );
-        }
-
-        const structuredContent = resolveProductOutputSchema.parse({ Product: product });
-        const result = {
-          content: [{ type: 'text' as const, text: 'Produto confirmado com sucesso.' }],
-          structuredContent
-        };
-
-        dependencies.logger.toolCompleted({
-          tool: TOOL_NAME,
-          durationMs: Date.now() - startedAt,
-          success: true
-        });
-
-        return withResolvedMeta(result, { IdItem: product.IdItem });
       } catch (error) {
         const normalizedError = error instanceof McpToolError
           ? error
@@ -83,7 +90,8 @@ export function registerResolveProductTool(
           tool: TOOL_NAME,
           durationMs: Date.now() - startedAt,
           success: false,
-          errorCode: normalizedError.code
+          errorCode: normalizedError.code,
+          ...getToolLogContext(meta, tenantIdentity)
         });
 
         return toToolErrorResult(normalizedError);

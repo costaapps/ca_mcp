@@ -1,6 +1,7 @@
 import { and, desc, eq, isNotNull, ne } from 'drizzle-orm';
 
 import type { McpDatabase } from '../connection.js';
+import { channel, chat } from '../schema/chat.js';
 import { message } from '../schema/message.js';
 
 export interface ChatHistoryMessage {
@@ -9,7 +10,7 @@ export interface ChatHistoryMessage {
 }
 
 export interface ChatRepositoryContract {
-  getChatHistory(idChat: number): Promise<ChatHistoryMessage[]>;
+  getChatHistory(idChat: number, idCompany: number): Promise<ChatHistoryMessage[]>;
 }
 
 export const CHAT_HISTORY_LIMIT = 15;
@@ -26,9 +27,16 @@ function toText(value: string | null): string | null {
 }
 
 export class ChatRepository implements ChatRepositoryContract {
-  public constructor(private readonly db: McpDatabase) {}
+  public constructor(
+    private readonly db: McpDatabase,
+    private readonly boundCompanyId?: number
+  ) {}
 
-  public async getChatHistory(idChat: number): Promise<ChatHistoryMessage[]> {
+  public async getChatHistory(idChat: number, idCompany: number): Promise<ChatHistoryMessage[]> {
+    if (this.boundCompanyId !== undefined && this.boundCompanyId !== idCompany) {
+      throw new Error('Chat repository company scope mismatch.');
+    }
+
     const rows = await this.db
       .select({
         idMessage: message.idMessage,
@@ -37,9 +45,12 @@ export class ChatRepository implements ChatRepositoryContract {
         dateTimeMessage: message.dateTimeMessage
       })
       .from(message)
+      .innerJoin(chat, eq(message.idChat, chat.idChat))
+      .innerJoin(channel, eq(chat.idChannel, channel.idChannel))
       .where(
         and(
           eq(message.idChat, idChat),
+          eq(channel.idCompany, idCompany),
           isNotNull(message.messageText),
           ne(message.messageText, '')
         )

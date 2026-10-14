@@ -3,9 +3,11 @@ import type { McpServer } from '@modelcontextprotocol/server';
 
 import { ERROR_CODES } from '../../errors/errorCodes.js';
 import { McpToolError } from '../../errors/McpToolError.js';
-import type { ProductRepositoryContract } from '../../database/repositories/productRepository.js';
+import type { TenantContextProvider, TenantIdentity } from '../../tenancy/contracts.js';
 import { extractCAMeta } from '../context/caMeta.js';
-import { requireExecutionId } from '../context/requireContext.js';
+import type { CAMeta } from '../context/caMeta.js';
+import { getToolLogContext } from '../context/toolLogContext.js';
+import { withRequiredTenantContext } from '../context/requireContext.js';
 import type { McpLogger } from '../logger.js';
 import { toToolErrorResult } from '../result.js';
 
@@ -30,7 +32,7 @@ export const productsOutputSchema = z.object({
 const TOOL_NAME = 'get_products';
 
 export interface GetProductsToolDependencies {
-  productRepository: ProductRepositoryContract;
+  tenantContextProvider: TenantContextProvider;
   logger: McpLogger;
 }
 
@@ -47,33 +49,38 @@ export function registerGetProductsTool(
     },
     async (arguments_, ctx) => {
       const startedAt = Date.now();
+      let meta: CAMeta | undefined;
+      let tenantIdentity: TenantIdentity | undefined;
 
       try {
-        const parsedArguments = getProductsInputSchema.safeParse(arguments_);
-        if (!parsedArguments.success) {
-          throw new McpToolError(ERROR_CODES.INVALID_ARGUMENTS, 'Argumentos inválidos para consulta de produtos.');
-        }
+        const operationMeta = extractCAMeta(ctx);
+        meta = operationMeta;
+        return await withRequiredTenantContext(dependencies.tenantContextProvider, operationMeta, async (tenant) => {
+          tenantIdentity = tenant.identity;
+          const parsedArguments = getProductsInputSchema.safeParse(arguments_);
+          if (!parsedArguments.success) {
+            throw new McpToolError(ERROR_CODES.INVALID_ARGUMENTS, 'Argumentos inválidos para consulta de produtos.');
+          }
 
-        const meta = extractCAMeta(ctx);
-        const idCompany = requireExecutionId(meta, 'IdCompany');
-        const products = await dependencies.productRepository.getProducts({
-          idCompany,
-          itemCode: parsedArguments.data.ItemCode,
-          itemName: parsedArguments.data.ItemName,
-          limit: parsedArguments.data.Limit
+          const products = await tenant.productRepository.getProducts({
+            itemCode: parsedArguments.data.ItemCode,
+            itemName: parsedArguments.data.ItemName,
+            limit: parsedArguments.data.Limit
+          });
+          const structuredContent = productsOutputSchema.parse({ Products: products });
+
+          dependencies.logger.toolCompleted({
+            tool: TOOL_NAME,
+            durationMs: Date.now() - startedAt,
+            success: true,
+            ...getToolLogContext(operationMeta, tenant.identity)
+          });
+
+          return {
+            content: [{ type: 'text' as const, text: 'Produtos consultados com sucesso.' }],
+            structuredContent
+          };
         });
-        const structuredContent = productsOutputSchema.parse({ Products: products });
-
-        dependencies.logger.toolCompleted({
-          tool: TOOL_NAME,
-          durationMs: Date.now() - startedAt,
-          success: true
-        });
-
-        return {
-          content: [{ type: 'text' as const, text: 'Produtos consultados com sucesso.' }],
-          structuredContent
-        };
       } catch (error) {
         const normalizedError = error instanceof McpToolError
           ? error
@@ -85,7 +92,8 @@ export function registerGetProductsTool(
           tool: TOOL_NAME,
           durationMs: Date.now() - startedAt,
           success: false,
-          errorCode: normalizedError.code
+          errorCode: normalizedError.code,
+          ...getToolLogContext(meta, tenantIdentity)
         });
 
         return toToolErrorResult(normalizedError);

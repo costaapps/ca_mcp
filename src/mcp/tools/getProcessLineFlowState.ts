@@ -3,10 +3,12 @@ import type { McpServer } from '@modelcontextprotocol/server';
 
 import { ERROR_CODES } from '../../errors/errorCodes.js';
 import { McpToolError } from '../../errors/McpToolError.js';
-import type { FlowRepositoryContract } from '../../database/repositories/flowRepository.js';
+import type { TenantContextProvider, TenantIdentity } from '../../tenancy/contracts.js';
+import type { CAMeta } from '../context/caMeta.js';
+import { getToolLogContext } from '../context/toolLogContext.js';
 import type { McpLogger } from '../logger.js';
 import { extractCAMeta } from '../context/caMeta.js';
-import { requireExecutionId } from '../context/requireContext.js';
+import { requireExecutionId, withRequiredTenantContext } from '../context/requireContext.js';
 import { toToolErrorResult } from '../result.js';
 
 export const processLineFlowStateOutputSchema = z.object({
@@ -36,7 +38,7 @@ const emptyInputSchema = z.object({});
 const TOOL_NAME = 'get_process_line_flow_state';
 
 export interface ProcessLineFlowStateToolDependencies {
-  flowRepository: FlowRepositoryContract;
+  tenantContextProvider: TenantContextProvider;
   logger: McpLogger;
 }
 
@@ -53,31 +55,41 @@ export function registerGetProcessLineFlowStateTool(
     },
     async (_arguments, ctx) => {
       const startedAt = Date.now();
+      let meta: CAMeta | undefined;
+      let tenantIdentity: TenantIdentity | undefined;
 
       try {
-        const meta = extractCAMeta(ctx);
-        const idProcessLine = requireExecutionId(meta, 'IdProcessLine');
-        const steps = await dependencies.flowRepository.getProcessLineFlowState(idProcessLine);
-        let structuredContent: z.infer<typeof processLineFlowStateOutputSchema>;
-        try {
-          structuredContent = processLineFlowStateOutputSchema.parse({ Steps: steps });
-        } catch {
-          throw new McpToolError(
-            ERROR_CODES.TOOL_EXECUTION_ERROR,
-            'A ferramenta produziu uma saída inválida.'
+        const operationMeta = extractCAMeta(ctx);
+        meta = operationMeta;
+        return await withRequiredTenantContext(dependencies.tenantContextProvider, operationMeta, async (tenant) => {
+          tenantIdentity = tenant.identity;
+          const idProcessLine = requireExecutionId(operationMeta, 'IdProcessLine');
+          const steps = await tenant.flowRepository.getProcessLineFlowState(
+            idProcessLine,
+            tenant.identity.idCompany
           );
-        }
+          let structuredContent: z.infer<typeof processLineFlowStateOutputSchema>;
+          try {
+            structuredContent = processLineFlowStateOutputSchema.parse({ Steps: steps });
+          } catch {
+            throw new McpToolError(
+              ERROR_CODES.TOOL_EXECUTION_ERROR,
+              'A ferramenta produziu uma saída inválida.'
+            );
+          }
 
-        dependencies.logger.toolCompleted({
-          tool: TOOL_NAME,
-          durationMs: Date.now() - startedAt,
-          success: true
+          dependencies.logger.toolCompleted({
+            tool: TOOL_NAME,
+            durationMs: Date.now() - startedAt,
+            success: true,
+            ...getToolLogContext(operationMeta, tenant.identity)
+          });
+
+          return {
+            content: [{ type: 'text' as const, text: 'Estado do fluxo obtido com sucesso.' }],
+            structuredContent
+          };
         });
-
-        return {
-          content: [{ type: 'text' as const, text: 'Estado do fluxo obtido com sucesso.' }],
-          structuredContent
-        };
       } catch (error) {
         const normalizedError = error instanceof McpToolError
           ? error
@@ -89,7 +101,8 @@ export function registerGetProcessLineFlowStateTool(
           tool: TOOL_NAME,
           durationMs: Date.now() - startedAt,
           success: false,
-          errorCode: normalizedError.code
+          errorCode: normalizedError.code,
+          ...getToolLogContext(meta, tenantIdentity)
         });
 
         return toToolErrorResult(normalizedError);

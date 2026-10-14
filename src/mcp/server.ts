@@ -1,12 +1,6 @@
 import { McpServer } from '@modelcontextprotocol/server';
 
-import type { ChatRepositoryContract } from '../database/repositories/chatRepository.js';
-import type { FlowRepositoryContract } from '../database/repositories/flowRepository.js';
-import type { ProductRepositoryContract } from '../database/repositories/productRepository.js';
-import type { PriceListRepositoryContract } from '../database/repositories/priceListRepository.js';
-import type { ItemPriceRepositoryContract } from '../database/repositories/itemPriceRepository.js';
-import type { CoreFlowClientContract } from '../core/contracts.js';
-import type { CoreNavigationClientContract } from '../core/contracts.js';
+import type { TenantContextProvider } from '../tenancy/contracts.js';
 import { consoleMcpLogger, type McpLogger } from './logger.js';
 import { registerGetChatHistoryTool } from './tools/getChatHistory.js';
 import { registerGetProcessLineFlowStateTool } from './tools/getProcessLineFlowState.js';
@@ -21,13 +15,7 @@ import { registerListNavigationDestinationsTool } from './tools/listNavigationDe
 import { registerRequestHandoffTool } from './tools/requestHandoff.js';
 
 export interface McpServerDependencies {
-  chatRepository: ChatRepositoryContract;
-  flowRepository: FlowRepositoryContract;
-  productRepository: ProductRepositoryContract;
-  priceListRepository: PriceListRepositoryContract;
-  itemPriceRepository: ItemPriceRepositoryContract;
-  coreFlowClient: CoreFlowClientContract;
-  coreNavigationClient: CoreNavigationClientContract;
+  tenantContextProvider: TenantContextProvider;
   logger?: McpLogger;
 }
 
@@ -37,50 +25,50 @@ export interface McpServerDependencies {
  */
 export function createMcpServer(dependencies: McpServerDependencies): McpServer {
   const logger = dependencies.logger ?? consoleMcpLogger;
-  const server = new McpServer({ name: 'costaapps-ca-mcp', version: '0.1.0' });
+  const server = new McpServer({ name: 'costaapps-ca-mcp', version: '0.2.0' });
 
   registerGetChatHistoryTool(server, {
-    chatRepository: dependencies.chatRepository,
+    tenantContextProvider: dependencies.tenantContextProvider,
     logger
   });
   registerGetProcessLineFlowStateTool(server, {
-    flowRepository: dependencies.flowRepository,
+    tenantContextProvider: dependencies.tenantContextProvider,
     logger
   });
   registerGetProductsTool(server, {
-    productRepository: dependencies.productRepository,
+    tenantContextProvider: dependencies.tenantContextProvider,
     logger
   });
   registerGetPriceListsTool(server, {
-    priceListRepository: dependencies.priceListRepository,
+    tenantContextProvider: dependencies.tenantContextProvider,
     logger
   });
   registerGetProductsPriceListsTool(server, {
-    itemPriceRepository: dependencies.itemPriceRepository,
+    tenantContextProvider: dependencies.tenantContextProvider,
     logger
   });
   registerResolveProductTool(server, {
-    productRepository: dependencies.productRepository,
+    tenantContextProvider: dependencies.tenantContextProvider,
     logger
   });
   registerListFlowActionsTool(server, {
-    coreFlowClient: dependencies.coreFlowClient,
+    tenantContextProvider: dependencies.tenantContextProvider,
     logger
   });
   registerDescribeFlowActionTool(server, {
-    coreFlowClient: dependencies.coreFlowClient,
+    tenantContextProvider: dependencies.tenantContextProvider,
     logger
   });
   registerExecuteFlowActionTool(server, {
-    coreFlowClient: dependencies.coreFlowClient,
+    tenantContextProvider: dependencies.tenantContextProvider,
     logger
   });
   registerListNavigationDestinationsTool(server, {
-    coreNavigationClient: dependencies.coreNavigationClient,
+    tenantContextProvider: dependencies.tenantContextProvider,
     logger
   });
   registerRequestHandoffTool(server, {
-    coreNavigationClient: dependencies.coreNavigationClient,
+    tenantContextProvider: dependencies.tenantContextProvider,
     logger
   });
 

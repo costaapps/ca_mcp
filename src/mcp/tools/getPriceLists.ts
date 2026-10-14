@@ -1,11 +1,13 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
 
-import type { PriceListRepositoryContract } from '../../database/repositories/priceListRepository.js';
+import type { TenantContextProvider, TenantIdentity } from '../../tenancy/contracts.js';
 import { ERROR_CODES } from '../../errors/errorCodes.js';
 import { McpToolError } from '../../errors/McpToolError.js';
 import { extractCAMeta } from '../context/caMeta.js';
-import { requireExecutionId } from '../context/requireContext.js';
+import type { CAMeta } from '../context/caMeta.js';
+import { getToolLogContext } from '../context/toolLogContext.js';
+import { withRequiredTenantContext } from '../context/requireContext.js';
 import type { McpLogger } from '../logger.js';
 import { toToolErrorResult } from '../result.js';
 
@@ -24,7 +26,7 @@ export const priceListsOutputSchema = z.object({
 const TOOL_NAME = 'get_pricelists';
 
 export interface GetPriceListsToolDependencies {
-  priceListRepository: PriceListRepositoryContract;
+  tenantContextProvider: TenantContextProvider;
   logger: McpLogger;
 }
 
@@ -41,31 +43,36 @@ export function registerGetPriceListsTool(
     },
     async (arguments_, ctx) => {
       const startedAt = Date.now();
+      let meta: CAMeta | undefined;
+      let tenantIdentity: TenantIdentity | undefined;
 
       try {
-        const parsedArguments = getPriceListsInputSchema.safeParse(arguments_);
-        if (!parsedArguments.success) {
-          throw new McpToolError(ERROR_CODES.INVALID_ARGUMENTS, 'Argumentos inválidos para consulta de listas de preços.');
-        }
+        const operationMeta = extractCAMeta(ctx);
+        meta = operationMeta;
+        return await withRequiredTenantContext(dependencies.tenantContextProvider, operationMeta, async (tenant) => {
+          tenantIdentity = tenant.identity;
+          const parsedArguments = getPriceListsInputSchema.safeParse(arguments_);
+          if (!parsedArguments.success) {
+            throw new McpToolError(ERROR_CODES.INVALID_ARGUMENTS, 'Argumentos inválidos para consulta de listas de preços.');
+          }
 
-        const meta = extractCAMeta(ctx);
-        const idCompany = requireExecutionId(meta, 'IdCompany');
-        const priceLists = await dependencies.priceListRepository.getPriceLists({
-          idCompany,
-          limit: parsedArguments.data.Limit
+          const priceLists = await tenant.priceListRepository.getPriceLists({
+            limit: parsedArguments.data.Limit
+          });
+          const structuredContent = priceListsOutputSchema.parse({ PriceLists: priceLists });
+
+          dependencies.logger.toolCompleted({
+            tool: TOOL_NAME,
+            durationMs: Date.now() - startedAt,
+            success: true,
+            ...getToolLogContext(operationMeta, tenant.identity)
+          });
+
+          return {
+            content: [{ type: 'text' as const, text: 'Listas de preços consultadas com sucesso.' }],
+            structuredContent
+          };
         });
-        const structuredContent = priceListsOutputSchema.parse({ PriceLists: priceLists });
-
-        dependencies.logger.toolCompleted({
-          tool: TOOL_NAME,
-          durationMs: Date.now() - startedAt,
-          success: true
-        });
-
-        return {
-          content: [{ type: 'text' as const, text: 'Listas de preços consultadas com sucesso.' }],
-          structuredContent
-        };
       } catch (error) {
         const normalizedError = error instanceof McpToolError
           ? error
@@ -77,7 +84,8 @@ export function registerGetPriceListsTool(
           tool: TOOL_NAME,
           durationMs: Date.now() - startedAt,
           success: false,
-          errorCode: normalizedError.code
+          errorCode: normalizedError.code,
+          ...getToolLogContext(meta, tenantIdentity)
         });
 
         return toToolErrorResult(normalizedError);

@@ -9,13 +9,14 @@ import { describeFlowActionOutputSchema, registerDescribeFlowActionTool } from '
 import { executeFlowActionOutputSchema, registerExecuteFlowActionTool } from '../../src/mcp/tools/executeFlowAction.js';
 import { registerListFlowActionsTool } from '../../src/mcp/tools/listFlowActions.js';
 import type { McpLogger } from '../../src/mcp/logger.js';
+import { addTenantUUID, createTenantFixture } from '../fixtures/tenantContext.js';
 
 function contextWithMeta(meta: unknown): ServerContext {
   return {
     mcpReq: {
       id: 1,
       method: 'tools/call',
-      _meta: meta as never,
+      _meta: addTenantUUID(meta) as never,
       requestState: (() => undefined) as ServerContext['mcpReq']['requestState'],
       signal: new AbortController().signal
     } as unknown as ServerContext['mcpReq']
@@ -44,6 +45,7 @@ const executionMeta = {
       ExecutionUUID: 'execution-1',
       TurnUUID: 'turn-1',
       IdCompany: 1003,
+      IdDatabase: 22,
       IdProcessLine: 456,
       IdProcessLineFlow: 999
     }
@@ -56,6 +58,18 @@ function coreClient(overrides: Partial<CoreFlowClientContract> = {}): CoreFlowCl
     describeFlowAction: vi.fn(),
     executeFlowAction: vi.fn(),
     ...overrides
+  };
+}
+
+function toolDependencies(
+  coreFlowClient: CoreFlowClientContract,
+  log: McpLogger,
+  requestUUID?: () => string
+) {
+  return {
+    tenantContextProvider: createTenantFixture({ coreFlowClient }).provider,
+    logger: log,
+    ...(requestUUID === undefined ? {} : { requestUUID })
   };
 }
 
@@ -78,9 +92,8 @@ describe('Flow MCP tools', () => {
       Data: { ...data, IdFlow: 123, ObjectType: 'PROMPT', DataType: 'string' }
     });
     const log = logger();
-    const callback = captureCallback((server) => registerDescribeFlowActionTool(server, {
-      coreFlowClient: coreClient({ describeFlowAction }), logger: log
-    }));
+    const callback = captureCallback((server) => registerDescribeFlowActionTool(server,
+      toolDependencies(coreClient({ describeFlowAction }), log)));
 
     const result = await callback({ Action: 'inform_code' }, contextWithMeta(executionMeta));
 
@@ -90,10 +103,11 @@ describe('Flow MCP tools', () => {
     expect(describeFlowAction).toHaveBeenCalledWith({
       ExecutionUUID: 'execution-1', IdCompany: 1003, IdProcessLine: 456, Action: 'inform_code'
     });
-    expect(log.toolCompleted).toHaveBeenCalledWith({
+    expect(log.toolCompleted).toHaveBeenCalledWith(expect.objectContaining({
       tool: 'describe_flow_action', durationMs: expect.any(Number), success: true,
-      ExecutionUUID: 'execution-1', TurnUUID: 'turn-1'
-    });
+      ExecutionUUID: 'execution-1', TurnUUID: 'turn-1',
+      CompanyUUID: '550e8400-e29b-41d4-a716-446655440000', IdCompany: 1003, IdDatabase: 22
+    }));
     expect(log.serverError).not.toHaveBeenCalled();
     if (!('ObjectDescription' in description)) {
       expect(result.structuredContent).not.toHaveProperty('ObjectDescription');
@@ -115,10 +129,8 @@ describe('Flow MCP tools', () => {
       Data: { Actions: [] }
     });
     const log = logger();
-    const callback = captureCallback((server) => registerListFlowActionsTool(server, {
-      coreFlowClient: coreClient({ listFlowActions }),
-      logger: log
-    }));
+    const callback = captureCallback((server) => registerListFlowActionsTool(server,
+      toolDependencies(coreClient({ listFlowActions }), log)));
 
     const result = await callback({}, contextWithMeta(executionMeta));
 
@@ -149,10 +161,8 @@ describe('Flow MCP tools', () => {
       ExecutionUUID: 'execution-1',
       Data: { Actions: actions }
     });
-    const callback = captureCallback((server) => registerListFlowActionsTool(server, {
-      coreFlowClient: coreClient({ listFlowActions }),
-      logger: logger()
-    }));
+    const callback = captureCallback((server) => registerListFlowActionsTool(server,
+      toolDependencies(coreClient({ listFlowActions }), logger())));
 
     const result = await callback({}, contextWithMeta(executionMeta));
 
@@ -176,10 +186,8 @@ describe('Flow MCP tools', () => {
         RequiredInputs: ['CustomerCode', 'Items']
       }
     });
-    const callback = captureCallback((server) => registerDescribeFlowActionTool(server, {
-      coreFlowClient: coreClient({ describeFlowAction }),
-      logger: logger()
-    }));
+    const callback = captureCallback((server) => registerDescribeFlowActionTool(server,
+      toolDependencies(coreClient({ describeFlowAction }), logger())));
 
     const result = await callback(
       { Action: 'create_sales_order' },
@@ -228,11 +236,8 @@ describe('Flow MCP tools', () => {
         }
       }
     });
-    const callback = captureCallback((server) => registerExecuteFlowActionTool(server, {
-      coreFlowClient: coreClient({ executeFlowAction }),
-      logger: logger(),
-      requestUUID: () => 'request-1'
-    }));
+    const callback = captureCallback((server) => registerExecuteFlowActionTool(server,
+      toolDependencies(coreClient({ executeFlowAction }), logger(), () => 'request-1')));
 
     const result = await callback({
       Action: 'create_sales_order',
@@ -281,9 +286,8 @@ describe('Flow MCP tools', () => {
         Invocation: { InvocationUUID: 'invocation-2', IdFlow: 3, IdProcessLineFlow: 4 }
       }
     });
-    const callback = captureCallback((server) => registerExecuteFlowActionTool(server, {
-      coreFlowClient: coreClient({ executeFlowAction }), logger: logger(), requestUUID: () => 'request-2'
-    }));
+    const callback = captureCallback((server) => registerExecuteFlowActionTool(server,
+      toolDependencies(coreClient({ executeFlowAction }), logger(), () => 'request-2')));
 
     const result = await callback({ Action: 'set_carrier', Input: { Value: 'jadlog' } }, contextWithMeta(executionMeta));
 
@@ -318,11 +322,8 @@ describe('Flow MCP tools', () => {
       }
     });
     const log = logger();
-    const callback = captureCallback((server) => registerExecuteFlowActionTool(server, {
-      coreFlowClient: coreClient({ executeFlowAction }),
-      logger: log,
-      requestUUID: () => 'request-1'
-    }));
+    const callback = captureCallback((server) => registerExecuteFlowActionTool(server,
+      toolDependencies(coreClient({ executeFlowAction }), log, () => 'request-1')));
 
     const result = await callback({
       Action: 'create_sales_order',
@@ -351,11 +352,8 @@ describe('Flow MCP tools', () => {
 
   it('falha de contexto do execute também não chama o Core', async () => {
     const executeFlowAction = vi.fn();
-    const callback = captureCallback((server) => registerExecuteFlowActionTool(server, {
-      coreFlowClient: coreClient({ executeFlowAction }),
-      logger: logger(),
-      requestUUID: () => 'request-1'
-    }));
+    const callback = captureCallback((server) => registerExecuteFlowActionTool(server,
+      toolDependencies(coreClient({ executeFlowAction }), logger(), () => 'request-1')));
 
     const result = await callback({
       Action: 'create_sales_order',

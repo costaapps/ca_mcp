@@ -10,7 +10,6 @@ export interface PriceListRecord {
 }
 
 export interface PriceListSearch {
-  idCompany: number;
   limit: number;
 }
 
@@ -19,7 +18,17 @@ export interface PriceListRepositoryContract {
 }
 
 export class PriceListRepository implements PriceListRepositoryContract {
-  public constructor(private readonly db: McpDatabase) {}
+  private readonly db: McpDatabase;
+  private readonly idCompany: number;
+
+  public constructor(db: McpDatabase, idCompany: number) {
+    if (!Number.isSafeInteger(idCompany) || idCompany <= 0) {
+      throw new RangeError('PriceListRepository exige um IdCompany positivo.');
+    }
+    this.db = db;
+    this.idCompany = idCompany;
+    Object.freeze(this);
+  }
 
   public async getPriceLists(search: PriceListSearch): Promise<PriceListRecord[]> {
     const rows = await this.db
@@ -29,7 +38,7 @@ export class PriceListRepository implements PriceListRepositoryContract {
         description: erpPriceList.description
       })
       .from(erpPriceList)
-      .where(eq(erpPriceList.idCompany, search.idCompany))
+      .where(eq(erpPriceList.idCompany, this.idCompany))
       .orderBy(asc(erpPriceList.idPriceList))
       .limit(search.limit);
 
