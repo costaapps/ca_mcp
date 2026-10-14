@@ -85,6 +85,29 @@ wait_until_ready() {
   return 1
 }
 
+image_has_verified_digest() {
+  local image_ref=$1 repo_digests
+  repo_digests=$(docker image inspect "$image_ref" --format '{{range .RepoDigests}}{{println .}}{{end}}' 2>/dev/null) || return 1
+  grep -Fxq -- "$image_ref" <<< "$repo_digests"
+}
+
+ensure_image_available_by_digest() {
+  local image_ref=$1
+  if image_has_verified_digest "$image_ref"; then
+    return 0
+  fi
+  docker pull "$image_ref" >/dev/null || return 1
+  image_has_verified_digest "$image_ref"
+}
+
+verify_running_image() {
+  local directory=$1 expected_image=$2 container_id installed_image
+  container_id=$(compose "$directory" ps -q mcp 2>/dev/null) || return 1
+  [[ -n $container_id ]] || return 1
+  installed_image=$(docker inspect --format '{{.Config.Image}}' "$container_id" 2>/dev/null) || return 1
+  [[ $installed_image == "$expected_image" ]]
+}
+
 recover_previous_release() {
   if (( active_run_number == 0 )); then
     compose "$release_dir" stop mcp >/dev/null 2>&1 || true
@@ -97,9 +120,10 @@ recover_previous_release() {
   local previous_image
   previous_image=$(sed -n 's/^MCP_IMAGE=//p' "$previous_dir/release.env" | head -n 1)
   [[ $previous_image == "$image_repository@$active_digest" && -f $previous_dir/installed.json ]] || return 1
-  docker pull "$previous_image" >/dev/null || return 1
+  ensure_image_available_by_digest "$previous_image" || return 1
   compose "$previous_dir" up -d --no-build --pull never mcp >/dev/null || return 1
-  wait_until_ready "$previous_dir"
+  wait_until_ready "$previous_dir" || return 1
+  image_has_verified_digest "$previous_image" && verify_running_image "$previous_dir" "$previous_image"
 }
 
 on_exit() {
@@ -157,7 +181,7 @@ if [[ $config_mode != 600 ]]; then
   echo 'shared/runtime.env must have mode 0600.' >&2
   exit 1
 fi
-for required_key in CENTRAL_DB_HOST CENTRAL_DB_PORT CENTRAL_DB_NAME CENTRAL_DB_USER CENTRAL_DB_PASS MCP_TENANT_ALLOWLIST; do
+for required_key in CENTRAL_DB_HOST CENTRAL_DB_NAME CENTRAL_DB_USER CENTRAL_DB_PASS MCP_TENANT_ALLOWLIST; do
   if ! awk -F= -v key="$required_key" '$1 == key { value = substr($0, index($0, "=") + 1); gsub(/^[[:space:]]+|[[:space:]]+$/, "", value); if (value != "" && value != "\"\"" && value != "\047\047") found = 1 } END { exit !found }' \
     "$deploy_root/shared/runtime.env"; then
     write_failure 'runtime_config_incomplete'
@@ -165,6 +189,12 @@ for required_key in CENTRAL_DB_HOST CENTRAL_DB_PORT CENTRAL_DB_NAME CENTRAL_DB_U
     exit 1
   fi
 done
+if awk -F= '$1 == "CENTRAL_DB_PORT" { value = substr($0, index($0, "=") + 1); gsub(/^[[:space:]]+|[[:space:]]+$/, "", value); if (value !~ /^[0-9]+$/ || value < 1 || value > 65535) invalid = 1 } END { exit !invalid }' \
+  "$deploy_root/shared/runtime.env"; then
+  write_failure 'runtime_config_invalid'
+  echo 'CENTRAL_DB_PORT must be an integer from 1 to 65535 when provided.' >&2
+  exit 1
+fi
 if awk -F= '/^DB_/ { found = 1 } $1 == "CORE_API_URL" { found = 1 } END { exit !found }' "$deploy_root/shared/runtime.env"; then
   write_failure 'legacy_global_database_config'
   echo 'Remove legacy DB_* and CORE_API_URL entries from shared/runtime.env.' >&2
@@ -249,7 +279,7 @@ if ! docker pull "$expected_image" >/dev/null; then
   exit 1
 fi
 
-if ! docker image inspect "$expected_image" --format '{{range .RepoDigests}}{{println .}}{{end}}' | grep -Fxq "$expected_image"; then
+if ! image_has_verified_digest "$expected_image"; then
   write_failure 'image_digest_mismatch'
   echo 'The pulled image does not contain the requested repository digest.' >&2
   exit 1
@@ -262,9 +292,7 @@ if ! compose "$release_dir" up -d --no-build --pull never mcp >/dev/null || \
   exit 1
 fi
 
-container_id=$(compose "$release_dir" ps -q mcp)
-installed_image=$(docker inspect --format '{{.Config.Image}}' "$container_id")
-if [[ $installed_image != "$expected_image" ]]; then
+if ! verify_running_image "$release_dir" "$expected_image"; then
   failure_code='installed_image_mismatch'
   echo 'The running MCP container does not use the published digest.' >&2
   exit 1

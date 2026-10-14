@@ -46,6 +46,8 @@ MCP_CORE_SETTINGS_CACHE_MS=60000
 MCP_SHUTDOWN_TIMEOUT_MS=75000
 ```
 
+`CENTRAL_DB_PORT` pode ser omitida; a aplicação usa `3306`. Se definida, precisa estar entre `1` e `65535`.
+
 ```sh
 sudo chown mcpdeploy:mcpdeploy /docker/containers/msg4/ca-mcp/shared/runtime.env
 sudo chmod 0600 /docker/containers/msg4/ca-mcp/shared/runtime.env
@@ -82,9 +84,13 @@ O workflow publica `eduardomatuellacostaapps/ca:mcp-<run_number>`, registra o di
 
 ## Atualizações
 
-Para cada release, incremente a versão SemVer no pacote, integre e valide o commit em `main`, depois envie uma tag `vX.Y.Z` igual à versão do pacote. Uma tag reexecutada só reutiliza a imagem de mesmo run, versão e commit; divergências fazem o workflow falhar sem substituir a tag. O deploy é serializado e o host rejeita runs mais antigos que a última atualização aplicada.
+Para cada release, incremente a versão SemVer no pacote, integre e valide o commit em `main`, depois envie uma tag `vX.Y.Z` igual à versão do pacote. Se a validação passar e apenas publicação/deploy falharem, use **Re-run failed jobs**: o job de publicação baixa o artifact pelo ID exportado pelo job de build, inclusive em outra tentativa do mesmo run.
+
+Uma tag já existente só é reutilizada quando os labels de versão, commit, run e origem correspondem ao artifact testado, a imagem é `linux/amd64` e o digest local corresponde ao digest do Docker Hub. Qualquer colisão falha sem sobrescrever a tag. O deploy é serializado e o host rejeita um run antigo depois que um run mais novo foi aplicado; iniciar outro deploy a partir desse run antigo não o rebaixa.
 
 O deploy guarda cada bundle e metadados em `releases/<run_number>/`, usa `current.json` como estado ativo e mantém `deploy.lock` durante atualização ou rollback. A configuração sensível continua em `shared/runtime.env`.
+
+Se uma nova versão falhar no startup ou readiness, o deploy tenta restaurar a release confirmada anterior. Ele valida primeiro o `RepoDigest` da imagem que já está no host e só baixa essa imagem se ela estiver ausente ou não corresponder ao digest registrado. Assim, a recuperação não depende do Docker Hub quando a imagem correta ainda está em cache.
 
 ## Rollback operacional
 
@@ -94,11 +100,15 @@ Execute o comando a partir do repositório, em um ambiente que tenha `MCP_DEPLOY
 bash ops/deploy/rollback-vps.sh 123
 ```
 
-Substitua `123` por um run registrado em `releases/<run_number>/installed.json`. O script baixa a imagem anterior pelo digest, atualiza somente `mcp`, espera o healthcheck e grava o estado ativo atomicamente. Se a versão alvo falhar, ele tenta restaurar a versão que estava ativa. Rollback não altera dados ou schema dos bancos.
+Substitua `123` por um run registrado em `releases/<run_number>/installed.json`. O rollback baixa a imagem alvo pelo digest, atualiza somente `mcp`, espera o healthcheck e grava o estado ativo atomicamente. Se a tentativa de rollback falhar, a recuperação primeiro valida o digest da imagem que estava ativa no cache local e só faz pull se essa imagem estiver ausente ou não tiver o RepoDigest esperado. Deploy e rollback não alteram dados ou schema dos bancos.
+
+Depois de uma falha, consulte `last-failure.json`; `current.json` conserva a última release confirmada. Os códigos `deploy_and_rollback_failed` e `rollback_and_recovery_failed` indicam que a recuperação não conseguiu restaurar a release anterior. Nesse caso, confira `docker compose ps`, os logs do serviço e `/health/ready` antes de repetir a operação ou encaminhar tráfego.
 
 ## Validação isolada dos scripts de deploy
 
 Execute `bash ops/ci/test-deploy-scripts.sh` em Linux para verificar as transações de instalação, atualização, readiness, rollback e rejeição de runs antigos. O teste copia os scripts remotos para um diretório temporário, substitui o diretório fixo de deploy apenas nas cópias e injeta um comando Docker simulado no `PATH`; não conecta por SSH, não acessa Docker Engine e não toca em containers ou serviços reais. Ele também rejeita bundles com traversal, nomes duplicados, symlinks, hardlinks ou tipos especiais e verifica que `shared/runtime.env` permanece intacto.
+
+`bash ops/ci/test-release-publish.sh` simula a publicação por Docker CLI fake, cobrindo tag nova e existente, reexecução, divergência de labels/digest, falhas de autenticação/rede/inspeção e ausência de `GITHUB_OUTPUT`. Também verifica que o workflow baixa o artifact pelo ID exportado, em vez de depender do nome da tentativa. O workflow de CI executa os dois testes sem secrets e sem publicar imagens.
 
 O smoke test da imagem no workflow usa Docker e bancos descartáveis separados; os testes dos scripts operacionais não substituem esse smoke test nem uma validação final da VPS preparada.
 

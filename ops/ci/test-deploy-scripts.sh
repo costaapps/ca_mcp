@@ -64,15 +64,20 @@ printf '%s\n' "$*" >> "$MOCK_DOCKER_LOG"
 active_dir_file="$MOCK_DOCKER_STATE/active-directory"
 active_image_file="$MOCK_DOCKER_STATE/active-image"
 active_run_file="$MOCK_DOCKER_STATE/active-run"
+local_images_file="$MOCK_DOCKER_STATE/local-images"
+touch "$local_images_file"
 
 if [[ ${1:-} == info ]]; then exit 0; fi
 if [[ ${1:-} == pull ]]; then
-  if [[ -n ${MOCK_FAIL_PULL_IMAGE:-} && ${2:-} == "$MOCK_FAIL_PULL_IMAGE" ]]; then exit 23; fi
+  image=${2:-}
+  if [[ -n ${MOCK_FAIL_PULL_IMAGE:-} && $image == "$MOCK_FAIL_PULL_IMAGE" ]]; then exit 23; fi
+  if ! grep -Fxq -- "$image" "$local_images_file"; then printf '%s\n' "$image" >> "$local_images_file"; fi
   exit 0
 fi
 if [[ ${1:-} == image && ${2:-} == inspect ]]; then
   image=${3:-}
   if [[ ${MOCK_BAD_DIGEST_IMAGE:-} == "$image" ]]; then exit 1; fi
+  if ! grep -Fxq -- "$image" "$local_images_file"; then exit 1; fi
   printf '%s\n' "$image"
   exit 0
 fi
@@ -133,6 +138,10 @@ case "$operation" in
     printf '%s' "$directory" > "$active_dir_file"
     printf '%s' "$release_image" > "$active_image_file"
     printf '%s' "$release_run" > "$active_run_file"
+    if [[ ${MOCK_EVICT_IMAGE_ON_RUN:-} == "$release_run" && -n ${MOCK_EVICT_IMAGE:-} ]]; then
+      grep -Fxv -- "$MOCK_EVICT_IMAGE" "$local_images_file" > "$local_images_file.tmp" || true
+      mv -f -- "$local_images_file.tmp" "$local_images_file"
+    fi
     ;;
   stop|rm)
     if [[ -f $active_dir_file && $(<"$active_dir_file") == "$directory" ]]; then
@@ -147,7 +156,7 @@ MOCK_DOCKER
   export MOCK_DOCKER_LOG="$SANDBOX/docker.log"
   export PATH="$MOCK_BIN:$PATH"
   : > "$MOCK_DOCKER_LOG"
-  unset MOCK_FAIL_PULL_IMAGE MOCK_BAD_DIGEST_IMAGE MOCK_FAIL_HEALTH_RUN MOCK_FAIL_UP_RUN MOCK_FAIL_CONFIG_RUN MOCK_COMPOSE_SERVICES || true
+  unset MOCK_FAIL_PULL_IMAGE MOCK_BAD_DIGEST_IMAGE MOCK_FAIL_HEALTH_RUN MOCK_FAIL_UP_RUN MOCK_FAIL_CONFIG_RUN MOCK_COMPOSE_SERVICES MOCK_EVICT_IMAGE MOCK_EVICT_IMAGE_ON_RUN || true
 }
 
 make_regular_bundle() {
@@ -185,6 +194,14 @@ state_field() {
   sed -n "s/.*\"$field\":\([0-9][0-9]*\).*/\1/p" "$DEPLOY_ROOT/current.json"
 }
 
+assert_mock_release_ready() {
+  local expected_run=$1 expected_image=$2
+  [[ $(<"$MOCK_STATE/active-run") == "$expected_run" ]] || fail "mock service is not on run $expected_run"
+  [[ $(docker inspect --format '{{.State.Status}}' mock-mcp-container) == running ]] || fail "run $expected_run is not running"
+  [[ $(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' mock-mcp-container) == healthy ]] || fail "run $expected_run is not healthy"
+  [[ $(docker inspect --format '{{.Config.Image}}' mock-mcp-container) == "$expected_image" ]] || fail "run $expected_run uses the wrong image digest"
+}
+
 expect_failure() {
   if "$@"; then fail "expected failure: $*"; fi
 }
@@ -213,12 +230,14 @@ calls_after=$(wc -l < "$MOCK_DOCKER_LOG")
 pass 'older workflow run cannot replace a newer deployment'
 
 export MOCK_FAIL_HEALTH_RUN="$run_one"
+export MOCK_FAIL_PULL_IMAGE="eduardomatuellacostaapps/ca@$digest_two"
 expect_failure rollback "$run_one"
-unset MOCK_FAIL_HEALTH_RUN
+unset MOCK_FAIL_HEALTH_RUN MOCK_FAIL_PULL_IMAGE
 [[ $(state_field activeRunNumber) == "$run_two" ]] || fail 'failed rollback did not preserve the active release'
-[[ $(<"$MOCK_STATE/active-run") == "$run_two" ]] || fail 'failed rollback did not restore the previous mock container'
+assert_mock_release_ready "$run_two" "eduardomatuellacostaapps/ca@$digest_two"
+[[ $(grep -Fx "pull eduardomatuellacostaapps/ca@$digest_two" "$MOCK_DOCKER_LOG" | wc -l) == 1 ]] || fail 'failed rollback pulled the already available previous digest'
 [[ $(grep -o '"code":"[^"]*"' "$DEPLOY_ROOT/last-failure.json") == '"code":"rollback_failed"' ]] || fail 'rollback failure code was not recorded'
-pass 'failed rollback restores the previously active release'
+pass 'failed rollback restores the cached previous digest without pulling it and records failure'
 
 rollback "$run_one" || fail 'rollback to registered release failed'
 [[ $(state_field activeRunNumber) == "$run_one" ]] || fail 'rollback target was not recorded as active'
@@ -234,11 +253,15 @@ calls_after=$(wc -l < "$MOCK_DOCKER_LOG")
 pass 'stale workflow run is rejected before invoking Docker'
 
 export MOCK_FAIL_HEALTH_RUN="$run_three"
+export MOCK_FAIL_PULL_IMAGE="eduardomatuellacostaapps/ca@$digest_one"
+previous_digest_pulls=$(grep -Fx "pull eduardomatuellacostaapps/ca@$digest_one" "$MOCK_DOCKER_LOG" | wc -l)
 expect_failure deploy "$run_three" "$version_three" "$commit_three" "$digest_three" 1
-unset MOCK_FAIL_HEALTH_RUN
+unset MOCK_FAIL_HEALTH_RUN MOCK_FAIL_PULL_IMAGE
 [[ $(state_field activeRunNumber) == "$run_one" ]] || fail 'failed startup changed recorded active release'
-[[ $(<"$MOCK_STATE/active-run") == "$run_one" ]] || fail 'failed startup did not restore the previous mock container'
-pass 'unhealthy update restores the previous release and leaves current.json unchanged'
+assert_mock_release_ready "$run_one" "eduardomatuellacostaapps/ca@$digest_one"
+[[ $(grep -Fx "pull eduardomatuellacostaapps/ca@$digest_one" "$MOCK_DOCKER_LOG" | wc -l) == "$previous_digest_pulls" ]] || fail 'unhealthy update pulled the already available previous digest'
+[[ $(grep -o '"code":"[^"]*"' "$DEPLOY_ROOT/last-failure.json") == '"code":"deploy_failed"' ]] || fail 'unhealthy update did not record its failure code'
+pass 'unhealthy update restores the cached previous digest without pulling it and records failure'
 
 export MOCK_FAIL_PULL_IMAGE="eduardomatuellacostaapps/ca@$digest_four"
 expect_failure deploy "$run_four" "$version_four" "$commit_four" "$digest_four" 1
@@ -247,6 +270,49 @@ unset MOCK_FAIL_PULL_IMAGE
 [[ $(<"$MOCK_STATE/active-run") == "$run_one" ]] || fail 'pull failure changed the active mock container'
 [[ $(grep -o '"code":"[^"]*"' "$DEPLOY_ROOT/last-failure.json") == '"code":"image_pull_failed"' ]] || fail 'pull failure code was not recorded'
 pass 'image pull failure leaves the active service and state untouched'
+
+setup_sandbox "cache-recovery-pull"
+deploy "$run_one" "$version_one" "$commit_one" "$digest_one" 1 || fail 'cache recovery fixture install failed'
+export MOCK_FAIL_HEALTH_RUN="$run_two"
+export MOCK_EVICT_IMAGE="eduardomatuellacostaapps/ca@$digest_one"
+export MOCK_EVICT_IMAGE_ON_RUN="$run_two"
+expect_failure deploy "$run_two" "$version_two" "$commit_two" "$digest_two" 1
+unset MOCK_FAIL_HEALTH_RUN MOCK_EVICT_IMAGE MOCK_EVICT_IMAGE_ON_RUN
+[[ $(<"$MOCK_STATE/active-run") == "$run_one" ]] || fail 'missing cached image was not pulled to restore the previous release'
+[[ $(grep -Fx "pull eduardomatuellacostaapps/ca@$digest_one" "$MOCK_DOCKER_LOG" | wc -l) == 2 ]] || fail 'recovery did not pull the absent previous image digest'
+[[ $(grep -o '"code":"[^"]*"' "$DEPLOY_ROOT/last-failure.json") == '"code":"deploy_failed"' ]] || fail 'successful recovery did not record the original deploy failure'
+pass 'recovery pulls a verified previous digest when it is absent locally'
+
+setup_sandbox "cache-recovery-failure"
+deploy "$run_one" "$version_one" "$commit_one" "$digest_one" 1 || fail 'failed-recovery fixture install failed'
+export MOCK_FAIL_HEALTH_RUN="$run_two"
+export MOCK_EVICT_IMAGE="eduardomatuellacostaapps/ca@$digest_one"
+export MOCK_EVICT_IMAGE_ON_RUN="$run_two"
+export MOCK_FAIL_PULL_IMAGE="eduardomatuellacostaapps/ca@$digest_one"
+expect_failure deploy "$run_two" "$version_two" "$commit_two" "$digest_two" 1
+unset MOCK_FAIL_HEALTH_RUN MOCK_EVICT_IMAGE MOCK_EVICT_IMAGE_ON_RUN MOCK_FAIL_PULL_IMAGE
+[[ $(state_field activeRunNumber) == "$run_one" ]] || fail 'failed recovery changed the last confirmed release state'
+[[ $(<"$MOCK_STATE/active-run") == "$run_two" ]] || fail 'failed recovery mock did not remain on the unready candidate'
+[[ $(grep -o '"code":"[^"]*"' "$DEPLOY_ROOT/last-failure.json") == '"code":"deploy_and_rollback_failed"' ]] || fail 'failed recovery was not recorded in failure JSON'
+pass 'failed recovery preserves current.json and records deploy_and_rollback_failed'
+
+setup_sandbox "rollback-recovery-failure"
+deploy "$run_one" "$version_one" "$commit_one" "$digest_one" 1 || fail 'rollback recovery fixture install failed'
+deploy "$run_two" "$version_two" "$commit_two" "$digest_two" 1 || fail 'rollback recovery fixture update failed'
+export MOCK_FAIL_HEALTH_RUN="$run_one"
+export MOCK_EVICT_IMAGE="eduardomatuellacostaapps/ca@$digest_two"
+export MOCK_EVICT_IMAGE_ON_RUN="$run_one"
+export MOCK_FAIL_PULL_IMAGE="eduardomatuellacostaapps/ca@$digest_two"
+expect_failure rollback "$run_one"
+[[ $(state_field activeRunNumber) == "$run_two" ]] || fail 'failed rollback recovery advanced confirmed current.json'
+[[ $(state_field lastAppliedRunNumber) == "$run_two" ]] || fail 'failed rollback recovery changed the high-water run number'
+[[ $(<"$MOCK_STATE/active-run") == "$run_one" ]] || fail 'failed rollback recovery mock did not remain on the unhealthy rollback target'
+[[ $(docker inspect --format '{{.State.Status}}' mock-mcp-container) == exited ]] || fail 'rollback target should remain stopped/unhealthy after recovery failure'
+[[ $(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' mock-mcp-container) == unhealthy ]] || fail 'rollback target health should remain unhealthy after recovery failure'
+[[ $(grep -o '"code":"[^"]*"' "$DEPLOY_ROOT/last-failure.json") == '"code":"rollback_and_recovery_failed"' ]] || fail 'rollback recovery failure was not recorded in failure JSON'
+[[ $(grep -Fx "pull eduardomatuellacostaapps/ca@$digest_two" "$MOCK_DOCKER_LOG" | wc -l) == 2 ]] || fail 'rollback recovery did not make exactly one pull attempt after cache eviction'
+unset MOCK_FAIL_HEALTH_RUN MOCK_EVICT_IMAGE MOCK_EVICT_IMAGE_ON_RUN MOCK_FAIL_PULL_IMAGE
+pass 'evicted rollback recovery digest fails safely and records rollback_and_recovery_failed'
 
 setup_sandbox "first-install-failure"
 export MOCK_FAIL_HEALTH_RUN="$run_one"
@@ -324,6 +390,44 @@ test_invalid_bundle hardlink make_hardlink_bundle
 test_invalid_bundle traversal make_traversal_bundle
 test_invalid_bundle duplicate make_duplicate_bundle
 test_invalid_bundle fifo make_fifo_bundle
+
+setup_sandbox "port-omitted"
+sed -i '/^CENTRAL_DB_PORT=/d' "$DEPLOY_ROOT/shared/runtime.env"
+deploy "$run_one" "$version_one" "$commit_one" "$digest_one" 1 || fail 'omitted CENTRAL_DB_PORT should use the application default'
+[[ $(state_field activeRunNumber) == "$run_one" ]] || fail 'omitted port configuration did not deploy'
+pass 'omitted CENTRAL_DB_PORT is accepted'
+
+for invalid_port in 0 65536 abc; do
+  setup_sandbox "port-invalid-$invalid_port"
+  sed -i '/^CENTRAL_DB_PORT=/d' "$DEPLOY_ROOT/shared/runtime.env"
+  printf 'CENTRAL_DB_PORT=%s\n' "$invalid_port" >> "$DEPLOY_ROOT/shared/runtime.env"
+  bundle=$(make_regular_bundle "$run_one" 1)
+  expect_failure bash "$SANDBOX/remote-deploy.sh" "$run_one" "$version_one" "$commit_one" "$digest_one" "$bundle"
+  [[ $(grep -o '"code":"[^"]*"' "$DEPLOY_ROOT/last-failure.json") == '"code":"runtime_config_invalid"' ]] || fail "invalid port $invalid_port was not recorded"
+  [[ ! -s $MOCK_DOCKER_LOG ]] || fail "invalid port $invalid_port reached Docker"
+done
+pass 'provided CENTRAL_DB_PORT values are range and type validated'
+
+setup_sandbox "rollback-port-omitted"
+deploy "$run_one" "$version_one" "$commit_one" "$digest_one" 1 || fail 'rollback port fixture install failed'
+deploy "$run_two" "$version_two" "$commit_two" "$digest_two" 1 || fail 'rollback port fixture update failed'
+sed -i '/^CENTRAL_DB_PORT=/d' "$DEPLOY_ROOT/shared/runtime.env"
+rollback "$run_one" || fail 'rollback should accept omitted CENTRAL_DB_PORT'
+[[ $(state_field activeRunNumber) == "$run_one" ]] || fail 'rollback with omitted port did not activate its target'
+pass 'rollback also accepts omitted CENTRAL_DB_PORT'
+
+setup_sandbox "rollback-port-invalid"
+deploy "$run_one" "$version_one" "$commit_one" "$digest_one" 1 || fail 'invalid rollback port fixture install failed'
+deploy "$run_two" "$version_two" "$commit_two" "$digest_two" 1 || fail 'invalid rollback port fixture update failed'
+sed -i '/^CENTRAL_DB_PORT=/d' "$DEPLOY_ROOT/shared/runtime.env"
+printf 'CENTRAL_DB_PORT=65536\n' >> "$DEPLOY_ROOT/shared/runtime.env"
+calls_before=$(wc -l < "$MOCK_DOCKER_LOG")
+expect_failure rollback "$run_one"
+calls_after=$(wc -l < "$MOCK_DOCKER_LOG")
+[[ $calls_before == "$calls_after" ]] || fail 'invalid rollback port reached Docker'
+[[ $(state_field activeRunNumber) == "$run_two" ]] || fail 'invalid rollback port changed the confirmed release'
+[[ $(grep -o '"code":"[^"]*"' "$DEPLOY_ROOT/last-failure.json") == '"code":"runtime_config_invalid"' ]] || fail 'invalid rollback port was not recorded'
+pass 'rollback rejects an out-of-range CENTRAL_DB_PORT before Docker'
 
 setup_sandbox "compose-scope"
 export MOCK_COMPOSE_SERVICES=$'mcp\nother-service'
