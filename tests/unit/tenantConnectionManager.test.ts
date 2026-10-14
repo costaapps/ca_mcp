@@ -23,6 +23,12 @@ function fakePool(execute = vi.fn().mockResolvedValue([[], []])): FakePool {
   return { pool: { execute, end } as unknown as Pool, execute, end };
 }
 
+function deferred<T = void>(): { promise: Promise<T>; resolve(value: T): void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((complete) => { resolve = complete; });
+  return { promise, resolve };
+}
+
 function createManager(options: {
   maxPools?: number;
   idleTtlMs?: number;
@@ -88,6 +94,65 @@ describe('ConnectionManager', () => {
     await oldLease.release();
     expect(oldPool.end).toHaveBeenCalledTimes(1);
     await newLease.release();
+  });
+
+  it('protege a geração nova enquanto fecha a antiga sob pressão de capacidade', async () => {
+    const oldCloseStarted = deferred<void>();
+    const allowOldClose = deferred<void>();
+    const oldPool = fakePool();
+    oldPool.end.mockImplementation(async () => {
+      oldCloseStarted.resolve();
+      await allowOldClose.promise;
+    });
+    const rotatedPool = fakePool();
+    const competingPool = fakePool();
+    const factory = vi.fn()
+      .mockReturnValueOnce(oldPool.pool)
+      .mockReturnValueOnce(rotatedPool.pool)
+      .mockReturnValueOnce(competingPool.pool);
+    const manager = createManager({ maxPools: 2, factory });
+    managers.push(manager);
+
+    const original = await manager.acquire(10, credentials('tenant-a', 'old-secret'));
+    await original.release();
+
+    const rotating = manager.acquire(10, credentials('tenant-a', 'rotated-secret'));
+    void rotating.catch(() => undefined);
+    await oldCloseStarted.promise;
+
+    // The old close is deliberately held open. Acquiring a different database
+    // now forces the capacity path while the new generation has been published.
+    const competing = manager.acquire(20, credentials('tenant-b'));
+    void competing.catch(() => undefined);
+    try {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+      expect(factory).toHaveBeenCalledTimes(2);
+      expect(rotatedPool.end).not.toHaveBeenCalled();
+      expect(manager.diagnostics()).toEqual(expect.arrayContaining([
+        expect.objectContaining({ idDatabase: 10, references: 1, retired: false }),
+        expect.objectContaining({ idDatabase: 10, references: 0, retired: true })
+      ]));
+
+      allowOldClose.resolve();
+      const [rotatedLease, competingLease] = await Promise.all([rotating, competing]);
+
+      expect(rotatedLease.pool).toBe(rotatedPool.pool);
+      expect(rotatedPool.end).not.toHaveBeenCalled();
+      expect(competingLease.pool).toBe(competingPool.pool);
+      expect(factory).toHaveBeenCalledTimes(3);
+
+      await Promise.all([rotatedLease.release(), competingLease.release()]);
+    } finally {
+      // Never leave the controlled old-pool close pending if an assertion fails.
+      allowOldClose.resolve();
+    }
+    await manager.closeAll();
+
+    expect(oldPool.end).toHaveBeenCalledTimes(1);
+    expect(rotatedPool.end).toHaveBeenCalledTimes(1);
+    expect(competingPool.end).toHaveBeenCalledTimes(1);
+    expect(manager.diagnostics()).toEqual([]);
   });
 
   it('não encerra pools em uso para abrir espaço e retorna erro estável de capacidade', async () => {

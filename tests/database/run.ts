@@ -84,7 +84,15 @@ function coreResponse(request: { path: string; body: unknown }): { body: unknown
       body: {
         Success: true,
         ExecutionUUID: body.ExecutionUUID ?? 'execution-test',
-        Data: { Destinations: [] }
+        Data: {
+          Destinations: [{
+            DestinationRef: `destination-${tenant}`,
+            Kind: 'HOME',
+            Description: `Core ${tenant}`,
+            MenuGroup: null,
+            Keywords: null
+          }]
+        }
       }
     };
   }
