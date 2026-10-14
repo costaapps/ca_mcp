@@ -31,8 +31,7 @@ jobs:
           --health-retries=20
     outputs:
       version: ${{ steps.release.outputs.version }}
-      image: ${{ steps.release.outputs.image }}
-      version-image: ${{ steps.release.outputs.version-image }}
+      tested-image: ${{ steps.release.outputs.tested-image }}
       artifact-id: ${{ steps.image-artifact.outputs.artifact-id }}
     steps:
       - name: Check out full release history
@@ -70,8 +69,7 @@ jobs:
           fi
 
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "image=eduardomatuellacostaapps/ca:mcp-$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
-          echo "version-image=eduardomatuellacostaapps/ca:mcp-$version" >> "$GITHUB_OUTPUT"
+          echo "tested-image=ca-mcp-release:mcp-$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
 
       - name: Install dependencies
         run: npm ci
@@ -108,7 +106,7 @@ jobs:
 
       - name: Build production image for release smoke test
         env:
-          IMAGE: ${{ steps.release.outputs.image }}
+          IMAGE: ${{ steps.release.outputs.tested-image }}
           VERSION: ${{ steps.release.outputs.version }}
         run: |
           docker buildx build \
@@ -122,7 +120,7 @@ jobs:
 
       - name: Smoke test release image against disposable services
         env:
-          IMAGE: ${{ steps.release.outputs.image }}
+          IMAGE: ${{ steps.release.outputs.tested-image }}
           MCP_TEST_DB_HOST: 127.0.0.1
           MCP_TEST_DB_PORT: 3306
           MCP_TEST_DB_USER: root
@@ -132,7 +130,7 @@ jobs:
 
       - name: Export the tested image
         env:
-          IMAGE: ${{ steps.release.outputs.image }}
+          IMAGE: ${{ steps.release.outputs.tested-image }}
         run: docker save --output "$RUNNER_TEMP/mcp-release-image.tar" "$IMAGE"
 
       - name: Upload the tested image artifact
@@ -150,10 +148,6 @@ jobs:
     needs: validate-and-build
     permissions:
       contents: read
-    outputs:
-      digest: ${{ steps.publish.outputs.digest }}
-      image: ${{ needs.validate-and-build.outputs.image }}
-      version-image: ${{ needs.validate-and-build.outputs.version-image }}
     steps:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
@@ -170,15 +164,26 @@ jobs:
       - name: Authenticate to Docker Hub
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
         with:
-          username: eduardomatuellacostaapps
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Verify or publish both immutable release tags
         id: publish
         env:
-          IMAGE: ${{ needs.validate-and-build.outputs.image }}
-          VERSION_IMAGE: ${{ needs.validate-and-build.outputs.version-image }}
+          TESTED_IMAGE: ${{ needs.validate-and-build.outputs.tested-image }}
+          DOCKERHUB_IMAGE: ${{ secrets.DOCKERHUB_IMAGE }}
           VERSION: ${{ needs.validate-and-build.outputs.version }}
           EXPECTED_REVISION: ${{ github.sha }}
           EXPECTED_RUN: ${{ github.run_number }}
-        run: bash ops/release/publish-tested-image.sh
+        run: |
+          set -euo pipefail
+          : "${DOCKERHUB_IMAGE:?DOCKERHUB_IMAGE secret is required}"
+          if [[ ! "$DOCKERHUB_IMAGE" =~ ^[a-z0-9]+([._-][a-z0-9]+)*/[a-z0-9]+([._-][a-z0-9]+)*$ ]]; then
+            echo "The DOCKERHUB_IMAGE secret must be a Docker Hub owner/repository name." >&2
+            exit 1
+          fi
+          IMAGE="$DOCKERHUB_IMAGE:mcp-$EXPECTED_RUN"
+          VERSION_IMAGE="$DOCKERHUB_IMAGE:mcp-$VERSION"
+          docker tag "$TESTED_IMAGE" "$IMAGE"
+          export IMAGE VERSION_IMAGE
+          bash ops/release/publish-tested-image.sh

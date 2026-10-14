@@ -76,7 +76,7 @@ jobs:
 
       - name: Build production image for smoke test
         env:
-          IMAGE: eduardomatuellacostaapps/ca:mcp-${{ github.run_number }}
+          IMAGE: ca-mcp-smoke:mcp-${{ github.run_number }}
         run: |
           VERSION="$(node -p "require('./package.json').version")"
           docker buildx build \
@@ -90,7 +90,7 @@ jobs:
 
       - name: Smoke test production image against disposable services
         env:
-          IMAGE: eduardomatuellacostaapps/ca:mcp-${{ github.run_number }}
+          IMAGE: ca-mcp-smoke:mcp-${{ github.run_number }}
           MCP_TEST_DB_HOST: 127.0.0.1
           MCP_TEST_DB_PORT: 3306
           MCP_TEST_DB_USER: root
