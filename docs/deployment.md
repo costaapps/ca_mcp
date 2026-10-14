@@ -1,33 +1,30 @@
-# Deploy do ca_mcp
+# Operação manual do ca_mcp na VPS
 
-Este runbook cobre o serviço MCP central, a publicação de imagens no Docker Hub e a atualização de uma única instância em uma VPS Linux. O workflow de release atualiza somente o serviço `mcp` do projeto Compose `ca-mcp`; ele não instala Docker, altera o proxy nem toca em outros containers ou bancos.
+O GitHub Actions valida e publica imagens no Docker Hub. Ele não acessa a VPS. A instalação, atualização e reversão são feitas manualmente com Docker Compose a partir deste repositório.
 
-## Pré-requisitos da VPS
+## Pré-requisitos
 
-- Docker Engine e o plugin Docker Compose v2 instalados e funcionando para o usuário de deploy.
-- Bash 4+, `flock`, GNU tar, `awk`, `sed`, `stat`, `grep`, `mktemp` e `date` disponíveis no host.
-- Proxy HTTPS existente encaminhando para `127.0.0.1:3102`.
-- Credencial de leitura do Docker Hub instalada para o usuário que executa Docker. Prefira o credential helper do Docker. O host precisa conseguir baixar `eduardomatuellacostaapps/ca`.
-- Chave SSH dedicada para deploy e a chave pública correspondente em `authorized_keys` desse usuário.
-- Arquivo `shared/runtime.env` configurado antes do primeiro deploy.
+- VPS Linux com Docker Engine e Docker Compose v2 instalados.
+- A VPS consegue acessar o repositório, o Docker Hub e o Registry central, as bases autorizadas e os serviços Core necessários.
+- O proxy HTTPS existente encaminha para `127.0.0.1:3102`.
+- Se o repositório de imagens for privado, configure no host credencial Docker Hub com permissão somente de leitura.
+- Antes de ativar a primeira release `0.2.0`, o AgentRuntime deve enviar `CompanyUUID` no metadata técnico de cada chamada MCP.
 
-Crie o diretório exclusivo e configure seu proprietário para o usuário de deploy:
+## Primeira instalação
+
+Clone o repositório no diretório escolhido para manter o serviço e crie a configuração local:
 
 ```sh
-sudo install -d -o mcpdeploy -g mcpdeploy -m 0750 /docker/containers/msg4/ca-mcp
-sudo install -d -o mcpdeploy -g mcpdeploy -m 0750 \
-  /docker/containers/msg4/ca-mcp/shared \
-  /docker/containers/msg4/ca-mcp/releases \
-  /docker/containers/msg4/ca-mcp/incoming
+git clone https://github.com/costaapps/ca_mcp.git
+cd ca_mcp
+cp .env.example .env
+chmod 600 .env
 ```
 
-O usuário precisa de acesso ao Docker Engine para operar o container. Trate a conta e sua chave SSH como credenciais administrativas do host.
-
-## Configuração do serviço
-
-Crie `/docker/containers/msg4/ca-mcp/shared/runtime.env` fora da release. Defina os valores reais no host e aplique modo `0600`:
+Edite `.env` no host e defina a tag publicada e os valores reais do Runtime. Não versione nem compartilhe esse arquivo.
 
 ```dotenv
+MCP_IMAGE=eduardomatuellacostaapps/ca:mcp-0.2.0
 CENTRAL_DB_HOST=db-central.internal
 CENTRAL_DB_PORT=3306
 CENTRAL_DB_NAME=registry
@@ -46,84 +43,69 @@ MCP_CORE_SETTINGS_CACHE_MS=60000
 MCP_SHUTDOWN_TIMEOUT_MS=75000
 ```
 
-`CENTRAL_DB_PORT` pode ser omitida; a aplicação usa `3306`. Se definida, precisa estar entre `1` e `65535`.
+`MCP_TENANT_ALLOWLIST` é obrigatória em produção e limita as empresas atendidas por esta instalação; ela não autentica a origem das chamadas. `CENTRAL_DB_PORT` pode ser omitida para usar `3306`. As credenciais das bases das empresas e endereços Core são resolvidos pelo Registry e pelas configurações do Core.
+
+Suba e confira o serviço:
 
 ```sh
-sudo chown mcpdeploy:mcpdeploy /docker/containers/msg4/ca-mcp/shared/runtime.env
-sudo chmod 0600 /docker/containers/msg4/ca-mcp/shared/runtime.env
+docker compose pull
+docker compose up -d
+docker compose ps
+curl -fsS http://127.0.0.1:3102/health/ready
 ```
 
-`CENTRAL_DB_PASS` e as demais configurações centrais não devem ir para GitHub Actions, artifacts, argumentos de linha de comando ou imagem. `MCP_TENANT_ALLOWLIST` é a lista de empresas atendidas por esta instalação; ela não autentica a origem das chamadas.
+Valide também o endereço público pelo proxy HTTPS e uma chamada MCP do AgentRuntime. A porta do container é publicada somente no loopback da VPS.
 
-## Configuração do GitHub
+## Publicação de releases
 
-Configure estas variáveis de repositório ou de ambiente:
+Pull requests e pushes para `develop` ou `main` executam typecheck, lint, testes padrão, build, integração SQL em MariaDB 11.8.6 e smoke test da imagem. Eles não publicam imagens.
 
-| Tipo | Nome | Valor |
-|---|---|---|
-| Variable | `MCP_DEPLOY_HOST` | DNS ou IP da VPS |
-| Variable | `MCP_DEPLOY_USER` | Usuário SSH dedicado |
-| Variable | `MCP_DEPLOY_PORT` | Porta SSH; pode ser omitida para usar 22 |
-| Secret | `DOCKERHUB_TOKEN` | Token com permissão de escrita no Docker Hub, usado apenas pelo job de publicação |
-| Secret | `MCP_DEPLOY_SSH_KEY` | Chave privada da conta de deploy |
-| Secret | `MCP_DEPLOY_KNOWN_HOSTS` | Linha(s) `known_hosts` obtida(s) por canal administrativo confiável |
+Uma tag Git `vX.Y.Z` publica no Docker Hub somente depois que o commit pertence à `main`, a tag coincide com `package.json` e a imagem passou por todos os gates. O mesmo artefato testado recebe as tags:
 
-O workflow valida a chave do host com `StrictHostKeyChecking=yes`. Não gere `known_hosts` dinamicamente durante o deploy. CI de PR e pushes não recebe esses secrets.
+- `eduardomatuellacostaapps/ca:mcp-<run_number>`, para rastreabilidade do workflow;
+- `eduardomatuellacostaapps/ca:mcp-<versão>`, para seleção operacional, por exemplo `mcp-0.2.0`.
 
-## Primeira instalação
+As duas tags devem apontar para o mesmo digest. O publicador verifica labels, plataforma e digest; se uma tag já existir com outra imagem, a publicação falha sem tentar substituí-la. Reexecuções reutilizam tags correspondentes e podem completar uma publicação parcial. O workflow não publica nem depende de `latest` e não executa SSH ou deploy remoto.
 
-Antes de publicar `v0.2.0`, atualize o AgentRuntime para enviar `CompanyUUID` no metadata técnico em cada chamada de tool MCP e confirme que o consumidor está pronto para o contrato central. A instalação não deve receber tráfego produtivo de um consumidor antigo.
+Para uma proteção no próprio registry contra alterações feitas por outros escritores, habilite tags imutáveis no Docker Hub para o padrão `^mcp-[0-9]+\.[0-9]+\.[0-9]+$`, se esse recurso estiver disponível na conta. Consulte [Immutable tags on Docker Hub](https://docs.docker.com/docker-hub/repos/manage/hub-images/immutable-tags/). O token `DOCKERHUB_TOKEN` do GitHub Actions precisa somente de permissão de escrita no repositório de imagens e é usado pelo job de publicação.
 
-1. Faça merge da implementação validada para `main`.
-2. Confirme que o commit inclui a versão `0.2.0` e que os gates da branch passaram.
-3. Crie e envie a tag `v0.2.0` sobre esse commit. O workflow exige que a tag corresponda a `package.json` e que o commit faça parte de `main`.
-4. Acompanhe os jobs de validação, smoke da imagem, publicação e deploy.
-5. Após o healthcheck ficar saudável, valide o endpoint HTTPS pelo proxy existente e uma chamada autorizada do AgentRuntime.
+## Atualização
 
-O workflow publica `eduardomatuellacostaapps/ca:mcp-<run_number>`, registra o digest e usa esse digest no deploy. Não publica nem depende de `latest`. O job de publicação só ocorre depois de a imagem exata ter passado pelo smoke test.
-
-## Atualizações
-
-Para cada release, incremente a versão SemVer no pacote, integre e valide o commit em `main`, depois envie uma tag `vX.Y.Z` igual à versão do pacote. Se a validação passar e apenas publicação/deploy falharem, use **Re-run failed jobs**: o job de publicação baixa o artifact pelo ID exportado pelo job de build, inclusive em outra tentativa do mesmo run.
-
-Uma tag já existente só é reutilizada quando os labels de versão, commit, run e origem correspondem ao artifact testado, a imagem é `linux/amd64` e o digest local corresponde ao digest do Docker Hub. Qualquer colisão falha sem sobrescrever a tag. O deploy é serializado e o host rejeita um run antigo depois que um run mais novo foi aplicado; iniciar outro deploy a partir desse run antigo não o rebaixa.
-
-O deploy guarda cada bundle e metadados em `releases/<run_number>/`, usa `current.json` como estado ativo e mantém `deploy.lock` durante atualização ou rollback. A configuração sensível continua em `shared/runtime.env`.
-
-Se uma nova versão falhar no startup ou readiness, o deploy tenta restaurar a release confirmada anterior. Ele valida primeiro o `RepoDigest` da imagem que já está no host e só baixa essa imagem se ela estiver ausente ou não corresponder ao digest registrado. Assim, a recuperação não depende do Docker Hub quando a imagem correta ainda está em cache.
-
-## Rollback operacional
-
-Execute o comando a partir do repositório, em um ambiente que tenha `MCP_DEPLOY_HOST`, `MCP_DEPLOY_USER`, `MCP_DEPLOY_SSH_KEY` e `MCP_DEPLOY_KNOWN_HOSTS` configurados sem exibi-los no terminal:
+Depois de uma release validada e publicada, atualize o clone e selecione a tag de versão no `.env`:
 
 ```sh
-bash ops/deploy/rollback-vps.sh 123
+git pull --ff-only
+${EDITOR:-nano} .env
+docker compose pull
+docker compose up -d
+docker compose ps
+curl -fsS http://127.0.0.1:3102/health/ready
 ```
 
-Substitua `123` por um run registrado em `releases/<run_number>/installed.json`. O rollback baixa a imagem alvo pelo digest, atualiza somente `mcp`, espera o healthcheck e grava o estado ativo atomicamente. Se a tentativa de rollback falhar, a recuperação primeiro valida o digest da imagem que estava ativa no cache local e só faz pull se essa imagem estiver ausente ou não tiver o RepoDigest esperado. Deploy e rollback não alteram dados ou schema dos bancos.
+Confira `.env.example` após o `git pull` e acrescente manualmente ao `.env` quaisquer configurações novas, preservando os valores secretos existentes. O Compose não executa migrations de banco; mudanças de schema devem ser tratadas em procedimento separado.
 
-Depois de uma falha, consulte `last-failure.json`; `current.json` conserva a última release confirmada. Os códigos `deploy_and_rollback_failed` e `rollback_and_recovery_failed` indicam que a recuperação não conseguiu restaurar a release anterior. Nesse caso, confira `docker compose ps`, os logs do serviço e `/health/ready` antes de repetir a operação ou encaminhar tráfego.
+## Rollback
 
-## Validação isolada dos scripts de deploy
+Edite `.env` e restaure em `MCP_IMAGE` a tag da versão anterior. Em seguida:
 
-Execute `bash ops/ci/test-deploy-scripts.sh` em Linux para verificar as transações de instalação, atualização, readiness, rollback e rejeição de runs antigos. O teste copia os scripts remotos para um diretório temporário, substitui o diretório fixo de deploy apenas nas cópias e injeta um comando Docker simulado no `PATH`; não conecta por SSH, não acessa Docker Engine e não toca em containers ou serviços reais. Ele também rejeita bundles com traversal, nomes duplicados, symlinks, hardlinks ou tipos especiais e verifica que `shared/runtime.env` permanece intacto.
+```sh
+docker compose pull
+docker compose up -d
+docker compose ps
+curl -fsS http://127.0.0.1:3102/health/ready
+```
 
-`bash ops/ci/test-release-publish.sh` simula a publicação por Docker CLI fake, cobrindo tag nova e existente, reexecução, divergência de labels/digest, falhas de autenticação/rede/inspeção e ausência de `GITHUB_OUTPUT`. Também verifica que o workflow baixa o artifact pelo ID exportado, em vez de depender do nome da tentativa. O workflow de CI executa os dois testes sem secrets e sem publicar imagens.
-
-O smoke test da imagem no workflow usa Docker e bancos descartáveis separados; os testes dos scripts operacionais não substituem esse smoke test nem uma validação final da VPS preparada.
+O rollback troca a imagem do serviço. Ele não reverte alterações de dados ou schema nos bancos.
 
 ## Diagnóstico
 
 ```sh
-cd /docker/containers/msg4/ca-mcp/releases/123
-docker compose --project-name ca-mcp --project-directory "$PWD" \
-  --env-file release.env --file compose.yaml ps
-docker compose --project-name ca-mcp --project-directory "$PWD" \
-  --env-file release.env --file compose.yaml logs --tail=100 mcp
-cat /docker/containers/msg4/ca-mcp/current.json
-cat /docker/containers/msg4/ca-mcp/last-failure.json
+docker compose ps
+docker compose logs --tail=100 mcp
+curl -i http://127.0.0.1:3102/health/ready
 ```
 
-`current.json` registra a release ativa e o maior run aplicado. `last-failure.json`, quando existe, registra um código de erro e os identificadores da tentativa, sem segredos. Em falha no primeiro deploy, o container MCP malsucedido é parado e removido; outros serviços do host não são tocados.
+`/health/ready` depende da inicialização e da disponibilidade do Registry. Uma falha em uma base de empresa não deve derrubar a readiness global. Confirme conectividade, allowlist e configuração do Registry antes de encaminhar tráfego.
 
-Antes de repetir uma instalação, corrija o código indicado em `last-failure.json` e confira readiness em `/health/ready`. O endpoint `/health` e o bind local permanecem para o proxy já instalado.
+Para validar localmente os contratos de publicação e Compose, execute `bash ops/ci/test-release-publish.sh` e `bash ops/ci/test-compose-config.sh`. O workflow também executa ambos sem secrets de publicação.
+
