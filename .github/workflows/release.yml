@@ -1,4 +1,4 @@
-name: MCP release and deploy
+name: MCP release and publish
 
 on:
   push:
@@ -32,6 +32,7 @@ jobs:
     outputs:
       version: ${{ steps.release.outputs.version }}
       image: ${{ steps.release.outputs.image }}
+      version-image: ${{ steps.release.outputs.version-image }}
       artifact-id: ${{ steps.image-artifact.outputs.artifact-id }}
     steps:
       - name: Check out full release history
@@ -70,6 +71,7 @@ jobs:
 
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "image=eduardomatuellacostaapps/ca:mcp-$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "version-image=eduardomatuellacostaapps/ca:mcp-$version" >> "$GITHUB_OUTPUT"
 
       - name: Install dependencies
         run: npm ci
@@ -95,8 +97,8 @@ jobs:
           MCP_TEST_DB_ALLOW_CREATE_DROP: YES
         run: npm run test:database
 
-      - name: Deploy and rollback script tests
-        run: bash ops/ci/test-deploy-scripts.sh
+      - name: Compose configuration contract tests
+        run: bash ops/ci/test-compose-config.sh
 
       - name: Release image publication tests
         run: bash ops/ci/test-release-publish.sh
@@ -151,6 +153,7 @@ jobs:
     outputs:
       digest: ${{ steps.publish.outputs.digest }}
       image: ${{ needs.validate-and-build.outputs.image }}
+      version-image: ${{ needs.validate-and-build.outputs.version-image }}
     steps:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
@@ -170,35 +173,13 @@ jobs:
           username: eduardomatuellacostaapps
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Reuse a matching tag or publish without overwriting
+      - name: Verify or publish both immutable release tags
         id: publish
         env:
           IMAGE: ${{ needs.validate-and-build.outputs.image }}
+          VERSION_IMAGE: ${{ needs.validate-and-build.outputs.version-image }}
           VERSION: ${{ needs.validate-and-build.outputs.version }}
           EXPECTED_REVISION: ${{ github.sha }}
           EXPECTED_RUN: ${{ github.run_number }}
         run: bash ops/release/publish-tested-image.sh
 
-  deploy:
-    name: Deploy published digest to the VPS
-    runs-on: ubuntu-24.04
-    needs:
-      - validate-and-build
-      - publish
-    permissions:
-      contents: read
-    steps:
-      - name: Check out release deploy wrapper
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          fetch-depth: 1
-
-      - name: Deploy release by digest
-        env:
-          DIGEST: ${{ needs.publish.outputs.digest }}
-          MCP_DEPLOY_HOST: ${{ vars.MCP_DEPLOY_HOST }}
-          MCP_DEPLOY_USER: ${{ vars.MCP_DEPLOY_USER }}
-          MCP_DEPLOY_PORT: ${{ vars.MCP_DEPLOY_PORT || '22' }}
-          MCP_DEPLOY_SSH_KEY: ${{ secrets.MCP_DEPLOY_SSH_KEY }}
-          MCP_DEPLOY_KNOWN_HOSTS: ${{ secrets.MCP_DEPLOY_KNOWN_HOSTS }}
-        run: bash ops/deploy/deploy-vps.sh "$GITHUB_RUN_NUMBER" "$GITHUB_REF_NAME" "$GITHUB_SHA" "$DIGEST"
