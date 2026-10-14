@@ -66,7 +66,7 @@ Antes da primeira release, configure estes secrets do repositório no GitHub:
 - `DOCKERHUB_IMAGE`: nome completo do repositório de imagem (`eduardomatuellacostaapps/ca`);
 - `DOCKERHUB_TOKEN`: token com permissão de escrita nesse repositório.
 
-Uma tag Git `vX.Y.Z` publica no Docker Hub somente depois que o commit pertence à `main`, a tag coincide com `package.json` e a imagem passou por todos os gates. O mesmo artefato testado recebe as tags:
+Publicar uma GitHub Release associada à tag `vX.Y.Z` inicia o workflow de release. A publicação no Docker Hub só acontece depois que o commit pertence à `main`, a tag coincide com `package.json` e a imagem passou por todos os gates. O mesmo artefato testado recebe as tags:
 
 - `eduardomatuellacostaapps/ca:mcp-<run_number>`, para rastreabilidade do workflow;
 - `eduardomatuellacostaapps/ca:mcp-<versão>`, para seleção operacional, por exemplo `mcp-0.2.0`.

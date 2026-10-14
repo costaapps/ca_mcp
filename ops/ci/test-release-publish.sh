@@ -326,7 +326,8 @@ assert_workflow_line() {
   grep -Fq -- "$expected" "$release_workflow" || fail "release workflow contract is missing: $expected"
 }
 
-assert_workflow_line "tags:"
+assert_workflow_line 'release:'
+assert_workflow_line 'types: [published]'
 assert_workflow_line 'DOCKERHUB_IMAGE: ${{ secrets.DOCKERHUB_IMAGE }}'
 assert_workflow_line 'username: ${{ secrets.DOCKERHUB_USERNAME }}'
 assert_workflow_line 'docker tag "$TESTED_IMAGE" "$IMAGE"'
@@ -348,6 +349,6 @@ grep -Fq 'run: npm run test:database' "$ci_workflow" || fail 'CI no longer runs 
 grep -Fq 'ops/ci/image-smoke.ts' "$ci_workflow" || fail 'CI no longer runs the production image smoke test'
 ! grep -Eq 'DOCKERHUB_TOKEN|docker/login-action|MCP_DEPLOY_' "$ci_workflow" || fail 'CI receives a publish or deploy credential'
 ! grep -Fq 'eduardomatuellacostaapps/ca' "$ci_workflow" || fail 'CI smoke images must not depend on the Docker Hub repository secret'
-pass 'release workflow publishes two tags from the tested artifact and has no SSH deployment'
+pass 'published GitHub releases publish two tags from the tested artifact and have no SSH deployment'
 
 echo 'All isolated release publisher checks passed.'
