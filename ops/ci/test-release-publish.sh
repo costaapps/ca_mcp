@@ -45,11 +45,12 @@ setup_case() {
   : > "$MOCK_DOCKER_LOG"
   : > "$GITHUB_OUTPUT"
   export MOCK_DOCKER_LOG MOCK_DOCKER_STATE GITHUB_OUTPUT
-  export IMAGE VERSION_IMAGE VERSION EXPECTED_REVISION EXPECTED_RUN MOCK_TESTED_IMAGE_ID
+  export IMAGE VERSION_IMAGE VERSION DOCKERHUB_IMAGE EXPECTED_REVISION EXPECTED_RUN MOCK_TESTED_IMAGE_ID
   export MOCK_REPOSITORY="$repository"
   IMAGE=$run_image
   VERSION_IMAGE=$version_image
   VERSION=$version
+  DOCKERHUB_IMAGE=$repository
   EXPECTED_REVISION=$revision
   EXPECTED_RUN=$run_number
   MOCK_TESTED_IMAGE_ID=$image_id
@@ -325,15 +326,21 @@ assert_workflow_line() {
   grep -Fq -- "$expected" "$release_workflow" || fail "release workflow contract is missing: $expected"
 }
 
-assert_workflow_line "tags:"
-assert_workflow_line 'echo "version-image=eduardomatuellacostaapps/ca:mcp-$version" >> "$GITHUB_OUTPUT"'
-assert_workflow_line 'VERSION_IMAGE: ${{ needs.validate-and-build.outputs.version-image }}'
+assert_workflow_line 'release:'
+assert_workflow_line 'types: [published]'
+assert_workflow_line 'DOCKERHUB_IMAGE: ${{ secrets.DOCKERHUB_IMAGE }}'
+assert_workflow_line 'username: ${{ secrets.DOCKERHUB_USERNAME }}'
+assert_workflow_line 'docker tag "$TESTED_IMAGE" "$IMAGE"'
+assert_workflow_line 'echo "tested-image=ca-mcp-release:mcp-$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"'
 assert_workflow_line 'artifact-ids: ${{ needs.validate-and-build.outputs.artifact-id }}'
 assert_workflow_line 'name: mcp-release-image-${{ github.run_id }}-${{ github.run_attempt }}'
 assert_workflow_line 'password: ${{ secrets.DOCKERHUB_TOKEN }}'
 [[ $(grep -Fc '${{ github.run_attempt }}' "$release_workflow") == 1 ]] || fail 'run_attempt must appear only in the artifact name'
 [[ $(grep -Fc 'artifact-ids:' "$release_workflow") == 1 ]] || fail 'release image download must use the exported artifact ID'
 [[ $(grep -Fc '${{ secrets.DOCKERHUB_TOKEN }}' "$release_workflow") == 1 ]] || fail 'Docker Hub token must only be consumed by the publisher'
+[[ $(grep -Fc '${{ secrets.DOCKERHUB_USERNAME }}' "$release_workflow") == 1 ]] || fail 'Docker Hub username secret must only be consumed by the publisher'
+[[ $(grep -Fc '${{ secrets.DOCKERHUB_IMAGE }}' "$release_workflow") == 1 ]] || fail 'Docker Hub image secret must be consumed only to derive release references'
+! grep -Fq 'eduardomatuellacostaapps/ca' "$release_workflow" || fail 'release workflow must not hardcode the Docker Hub image repository'
 ! grep -Eq '^  deploy:' "$release_workflow" || fail 'release workflow still has a remote deploy job'
 ! grep -Eq 'MCP_DEPLOY_|MCP_DEPLOY_SSH_KEY|MCP_DEPLOY_KNOWN_HOSTS' "$release_workflow" || fail 'release workflow still references VPS deploy credentials'
 ! grep -Eq 'latest' "$release_workflow" || fail 'release workflow must not publish or depend on latest'
@@ -341,6 +348,7 @@ grep -Fq 'pull_request:' "$ci_workflow" || fail 'CI no longer runs for pull requ
 grep -Fq 'run: npm run test:database' "$ci_workflow" || fail 'CI no longer runs SQL integration tests'
 grep -Fq 'ops/ci/image-smoke.ts' "$ci_workflow" || fail 'CI no longer runs the production image smoke test'
 ! grep -Eq 'DOCKERHUB_TOKEN|docker/login-action|MCP_DEPLOY_' "$ci_workflow" || fail 'CI receives a publish or deploy credential'
-pass 'release workflow publishes two tags from the tested artifact and has no SSH deployment'
+! grep -Fq 'eduardomatuellacostaapps/ca' "$ci_workflow" || fail 'CI smoke images must not depend on the Docker Hub repository secret'
+pass 'published GitHub releases publish two tags from the tested artifact and have no SSH deployment'
 
 echo 'All isolated release publisher checks passed.'

@@ -4,12 +4,13 @@ set -euo pipefail
 : "${IMAGE:?IMAGE is required}"
 : "${VERSION_IMAGE:?VERSION_IMAGE is required}"
 : "${VERSION:?VERSION is required}"
+: "${DOCKERHUB_IMAGE:?DOCKERHUB_IMAGE is required}"
 : "${EXPECTED_REVISION:?EXPECTED_REVISION is required}"
 : "${EXPECTED_RUN:?EXPECTED_RUN is required}"
 : "${GITHUB_OUTPUT:?GITHUB_OUTPUT is required}"
 
 docker_bin="${DOCKER_BIN:-docker}"
-repository="${IMAGE%:*}"
+repository="$DOCKERHUB_IMAGE"
 inspect_output="$(mktemp)"
 trap 'rm -f -- "$inspect_output"' EXIT
 
@@ -17,7 +18,8 @@ docker_cli() {
   "$docker_bin" "$@"
 }
 
-if [[ "$IMAGE" != "$repository:mcp-$EXPECTED_RUN" \
+if [[ ! "$repository" =~ ^[a-z0-9]+([._-][a-z0-9]+)*/[a-z0-9]+([._-][a-z0-9]+)*$ \
+  || "$IMAGE" != "$repository:mcp-$EXPECTED_RUN" \
   || "$VERSION_IMAGE" != "$repository:mcp-$VERSION" ]]; then
   echo "Image references do not match the expected run and release version." >&2
   exit 1
