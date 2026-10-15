@@ -1,0 +1,188 @@
+name: MCP release and publish
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mcp-release
+  cancel-in-progress: false
+
+jobs:
+  validate-and-build:
+    name: Validate release and test production image
+    runs-on: ubuntu-24.04
+    services:
+      mariadb:
+        image: mariadb:11.8.6@sha256:df764e5c6d6d3fcf4a6c298f9ab52d4e783d34f6dc0347da91933ad7f5f6ebb6
+        env:
+          MARIADB_ROOT_PASSWORD: mcp_test_password
+          MARIADB_DATABASE: mcp_test_control
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      tested-image: ${{ steps.release.outputs.tested-image }}
+      artifact-id: ${{ steps.image-artifact.outputs.artifact-id }}
+    steps:
+      - name: Check out full release history
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Validate release tag and main ancestry
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Release tag must use vX.Y.Z format." >&2
+            exit 1
+          fi
+
+          version="$(node -p "require('./package.json').version")"
+          if [[ "$tag" != "v$version" ]]; then
+            echo "Git tag $tag does not match package version $version." >&2
+            exit 1
+          fi
+
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main; then
+            echo "Release commit $GITHUB_SHA is not contained in origin/main." >&2
+            exit 1
+          fi
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tested-image=ca-mcp-release:mcp-$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit and integration tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Database integration tests
+        env:
+          MCP_TEST_DB_HOST: 127.0.0.1
+          MCP_TEST_DB_PORT: 3306
+          MCP_TEST_DB_USER: root
+          MCP_TEST_DB_PASSWORD: mcp_test_password
+          MCP_TEST_DB_ALLOW_CREATE_DROP: YES
+        run: npm run test:database
+
+      - name: Compose configuration contract tests
+        run: bash ops/ci/test-compose-config.sh
+
+      - name: Release image publication tests
+        run: bash ops/ci/test-release-publish.sh
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+
+      - name: Build production image for release smoke test
+        env:
+          IMAGE: ${{ steps.release.outputs.tested-image }}
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          docker buildx build \
+            --platform linux/amd64 \
+            --load \
+            --tag "$IMAGE" \
+            --build-arg "OCI_VERSION=$VERSION" \
+            --build-arg "OCI_REVISION=$GITHUB_SHA" \
+            --build-arg "OCI_RUN=$GITHUB_RUN_NUMBER" \
+            .
+
+      - name: Smoke test release image against disposable services
+        env:
+          IMAGE: ${{ steps.release.outputs.tested-image }}
+          MCP_TEST_DB_HOST: 127.0.0.1
+          MCP_TEST_DB_PORT: 3306
+          MCP_TEST_DB_USER: root
+          MCP_TEST_DB_PASSWORD: mcp_test_password
+          MCP_TEST_DB_ALLOW_CREATE_DROP: YES
+        run: npx tsx ops/ci/image-smoke.ts "$IMAGE"
+
+      - name: Export the tested image
+        env:
+          IMAGE: ${{ steps.release.outputs.tested-image }}
+        run: docker save --output "$RUNNER_TEMP/mcp-release-image.tar" "$IMAGE"
+
+      - name: Upload the tested image artifact
+        id: image-artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: mcp-release-image-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/mcp-release-image.tar
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    name: Publish tested image to Docker Hub
+    runs-on: ubuntu-24.04
+    needs: validate-and-build
+    permissions:
+      contents: read
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+
+      - name: Download the image that passed release smoke tests
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          artifact-ids: ${{ needs.validate-and-build.outputs.artifact-id }}
+          path: ${{ runner.temp }}/mcp-release-image
+
+      - name: Load tested image
+        run: docker load --input "$RUNNER_TEMP/mcp-release-image/mcp-release-image.tar"
+
+      - name: Authenticate to Docker Hub
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Verify or publish both immutable release tags
+        id: publish
+        env:
+          TESTED_IMAGE: ${{ needs.validate-and-build.outputs.tested-image }}
+          DOCKERHUB_IMAGE: ${{ secrets.DOCKERHUB_IMAGE }}
+          VERSION: ${{ needs.validate-and-build.outputs.version }}
+          EXPECTED_REVISION: ${{ github.sha }}
+          EXPECTED_RUN: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          : "${DOCKERHUB_IMAGE:?DOCKERHUB_IMAGE secret is required}"
+          if [[ ! "$DOCKERHUB_IMAGE" =~ ^[a-z0-9]+([._-][a-z0-9]+)*/[a-z0-9]+([._-][a-z0-9]+)*$ ]]; then
+            echo "The DOCKERHUB_IMAGE secret must be a Docker Hub owner/repository name." >&2
+            exit 1
+          fi
+          IMAGE="$DOCKERHUB_IMAGE:mcp-$EXPECTED_RUN"
+          VERSION_IMAGE="$DOCKERHUB_IMAGE:mcp-$VERSION"
+          docker tag "$TESTED_IMAGE" "$IMAGE"
+          export IMAGE VERSION_IMAGE
+          bash ops/release/publish-tested-image.sh

@@ -1,0 +1,48 @@
+name: ca-mcp
+
+services:
+  mcp:
+    image: ${MCP_IMAGE:?set MCP_IMAGE to the published release tag}
+    init: true
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m,mode=1777
+    ports:
+      - target: 3102
+        published: "3102"
+        host_ip: 127.0.0.1
+        protocol: tcp
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      PORT: "3102"
+    cpus: 1.0
+    mem_limit: 512m
+    pids_limit: 128
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 90s
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          fetch('http://127.0.0.1:3102/health/ready')
+          .then((response) => process.exit(response.ok ? 0 : 1))
+          .catch(() => process.exit(1))
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 45s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    labels:
+      com.costaapps.service: ca-mcp

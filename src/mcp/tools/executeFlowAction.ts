@@ -1,0 +1,194 @@
+import { randomUUID } from 'node:crypto';
+
+import { z } from 'zod';
+import type { CallToolResult, McpServer } from '@modelcontextprotocol/server';
+
+import type { JsonObject } from '../../core/contracts.js';
+import type { TenantContextProvider, TenantIdentity } from '../../tenancy/contracts.js';
+import { jsonValueSchema } from '../../core/schemas.js';
+import { ERROR_CODES } from '../../errors/errorCodes.js';
+import { McpToolError } from '../../errors/McpToolError.js';
+import { extractCAMeta } from '../context/caMeta.js';
+import type { CAMeta } from '../context/caMeta.js';
+import { getToolLogContext } from '../context/toolLogContext.js';
+import { requireFlowExecutionContext, withRequiredTenantContext } from '../context/requireContext.js';
+import type { McpLogger } from '../logger.js';
+import { withCAMeta } from '../result.js';
+
+export const executeFlowActionInputSchema = z.object({
+  Action: z.string().trim().min(1),
+  Input: z.record(z.string(), jsonValueSchema)
+});
+
+const executeFlowActionSuccessSchema = z.object({
+  Success: z.literal(true),
+  Action: z.string(),
+  Status: z.enum(['COMPLETED', 'NEEDS_INPUT']),
+  MissingInformation: z.array(z.string()),
+  Output: jsonValueSchema
+});
+
+const executeFlowActionFailureSchema = z.object({
+  Success: z.literal(false),
+  Action: z.string(),
+  Output: z.null(),
+  Error: z.object({
+    Code: z.string(),
+    Message: z.string()
+  })
+});
+
+export const executeFlowActionOutputSchema = z.union([
+  executeFlowActionSuccessSchema,
+  executeFlowActionFailureSchema
+]);
+
+const TOOL_NAME = 'execute_flow_action';
+
+export interface ExecuteFlowActionToolDependencies {
+  tenantContextProvider: TenantContextProvider;
+  logger: McpLogger;
+  requestUUID?: () => string;
+}
+
+function actionFromArguments(arguments_: unknown): string {
+  if (typeof arguments_ !== 'object' || arguments_ === null || Array.isArray(arguments_)) return '';
+  const action = (arguments_ as Record<string, unknown>).Action;
+  return typeof action === 'string' ? action.trim() : '';
+}
+
+function executeFailureResult(error: McpToolError, action: string): CallToolResult {
+  const failure = {
+    Success: false,
+    Action: action,
+    Output: null,
+    Error: {
+      Code: error.code,
+      Message: error.message
+    }
+  };
+
+  return {
+    isError: true,
+    content: [{ type: 'text', text: JSON.stringify(failure) }],
+    structuredContent: failure
+  };
+}
+
+export function registerExecuteFlowActionTool(
+  server: McpServer,
+  dependencies: ExecuteFlowActionToolDependencies
+): void {
+  server.registerTool(
+    TOOL_NAME,
+    {
+      description: 'Executa uma capability previamente descoberta e descrita. O resultado pode ser COMPLETED ou NEEDS_INPUT, que solicita informação adicional e não é erro MCP. O Core revalida disponibilidade e lifecycle.',
+      inputSchema: executeFlowActionInputSchema,
+      outputSchema: executeFlowActionOutputSchema
+    },
+    async (arguments_, ctx) => {
+      const startedAt = Date.now();
+      const action = actionFromArguments(arguments_);
+      let executionUUID: string | undefined;
+      let turnUUID: string | undefined;
+      let requestUUIDForLog: string | undefined;
+      let invocationUUID: string | undefined;
+      let meta: CAMeta | undefined;
+      let tenantIdentity: TenantIdentity | undefined;
+
+      try {
+        const operationMeta = extractCAMeta(ctx);
+        meta = operationMeta;
+        return await withRequiredTenantContext(dependencies.tenantContextProvider, operationMeta, async (tenant) => {
+          tenantIdentity = tenant.identity;
+          const parsedArguments = executeFlowActionInputSchema.safeParse(arguments_);
+          if (!parsedArguments.success) {
+            throw new McpToolError(ERROR_CODES.INVALID_ARGUMENTS, 'Argumentos inválidos para executar a capability de Flow.');
+          }
+
+          const requestContext = requireFlowExecutionContext(operationMeta, tenant.identity.idCompany);
+          executionUUID = requestContext.ExecutionUUID;
+          turnUUID = requestContext.TurnUUID;
+          const { TurnUUID: _turnUUID, ...coreRequest } = requestContext;
+          const requestUUID = dependencies.requestUUID?.() ?? randomUUID();
+          requestUUIDForLog = requestUUID;
+          const coreFlowClient = await tenant.getCoreFlowClient();
+          const response = await coreFlowClient.executeFlowAction({
+            ...coreRequest,
+            IdCompany: tenant.identity.idCompany,
+            RequestUUID: requestUUID,
+            Action: parsedArguments.data.Action,
+            Input: parsedArguments.data.Input as JsonObject
+          });
+
+          if (!response.Success) {
+            const error = new McpToolError(response.Error.Code, response.Error.Message);
+            dependencies.logger.toolCompleted({
+              tool: TOOL_NAME,
+              durationMs: Date.now() - startedAt,
+              success: false,
+              errorCode: error.code,
+              ExecutionUUID: executionUUID,
+              TurnUUID: turnUUID,
+              RequestUUID: requestUUIDForLog,
+              ...getToolLogContext(operationMeta, tenant.identity)
+            });
+            return executeFailureResult(error, parsedArguments.data.Action);
+          }
+
+          const result: CallToolResult = {
+            content: [{ type: 'text', text: response.Data.Status === 'NEEDS_INPUT'
+              ? 'A capability precisa de informação adicional.'
+              : 'Capability de Flow executada com sucesso.' }],
+            structuredContent: {
+              Success: true,
+              Action: response.Data.Action,
+              Status: response.Data.Status,
+              MissingInformation: response.Data.MissingInformation,
+              Output: response.Data.Output
+            }
+          };
+          invocationUUID = response.Data.Invocation.InvocationUUID;
+
+          dependencies.logger.toolCompleted({
+            tool: TOOL_NAME,
+            durationMs: Date.now() - startedAt,
+            success: true,
+            ExecutionUUID: executionUUID,
+            TurnUUID: turnUUID,
+            RequestUUID: requestUUIDForLog,
+            InvocationUUID: invocationUUID,
+            ...getToolLogContext(operationMeta, tenant.identity)
+          });
+
+          return withCAMeta(result, { FlowInvocation: response.Data.Invocation });
+        });
+      } catch (error) {
+        const normalizedError = error instanceof McpToolError
+          ? error
+          : new McpToolError(ERROR_CODES.TOOL_EXECUTION_ERROR, 'Não foi possível executar a capability de Flow.');
+
+        if (!(error instanceof McpToolError)) dependencies.logger.serverError(error);
+
+        dependencies.logger.toolCompleted({
+          tool: TOOL_NAME,
+          durationMs: Date.now() - startedAt,
+          success: false,
+          errorCode: normalizedError.code,
+          ExecutionUUID: executionUUID,
+          TurnUUID: turnUUID,
+          RequestUUID: requestUUIDForLog,
+          InvocationUUID: invocationUUID,
+          ...getToolLogContext(meta, tenantIdentity)
+        });
+
+        return executeFailureResult(normalizedError, action);
+      }
+    }
+  );
+}
+
+export const executeFlowActionToolInternals = {
+  actionFromArguments,
+  executeFailureResult
+};

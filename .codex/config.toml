@@ -1,0 +1,11 @@
+default_permissions = "workspace-env-safe"
+
+[permissions.workspace-env-safe]
+extends = ":workspace"
+
+[permissions.workspace-env-safe.filesystem]
+glob_scan_max_depth = 16
+
+[permissions.workspace-env-safe.filesystem.":workspace_roots"]
+"." = "write"
+"**/.env" = "deny"
