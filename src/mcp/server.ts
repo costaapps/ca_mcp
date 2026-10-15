@@ -25,7 +25,7 @@ export interface McpServerDependencies {
  */
 export function createMcpServer(dependencies: McpServerDependencies): McpServer {
   const logger = dependencies.logger ?? consoleMcpLogger;
-  const server = new McpServer({ name: 'costaapps-ca-mcp', version: '0.2.0' });
+  const server = new McpServer({ name: 'costaapps-ca-mcp', version: '0.2.1' });
 
   registerGetChatHistoryTool(server, {
     tenantContextProvider: dependencies.tenantContextProvider,

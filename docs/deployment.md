@@ -9,7 +9,7 @@ O GitHub Actions valida e publica imagens no Docker Hub. Ele não acessa a VPS. 
 - A VPS consegue acessar o repositório, o Docker Hub e o Registry central, as bases autorizadas e os serviços Core necessários.
 - O proxy HTTPS existente encaminha para `mcp:3102` pela rede `ai-shared`.
 - Se o repositório de imagens for privado, configure no host credencial Docker Hub com permissão somente de leitura.
-- Antes de ativar a primeira release `0.2.0`, o AgentRuntime deve enviar `CompanyUUID` no metadata técnico de cada chamada MCP.
+- Antes de ativar a primeira release `0.2.1`, o AgentRuntime deve enviar `CompanyUUID` no metadata técnico de cada chamada MCP.
 
 ## Primeira instalação
 
@@ -25,7 +25,7 @@ chmod 600 .env
 Edite `.env` no host e defina a tag publicada e os valores reais do Runtime. Não versione nem compartilhe esse arquivo.
 
 ```dotenv
-MCP_IMAGE=eduardomatuellacostaapps/ca:mcp-0.2.0
+MCP_IMAGE=eduardomatuellacostaapps/ca:mcp-0.2.1
 CENTRAL_DB_HOST=db-central.internal
 CENTRAL_DB_PORT=3306
 CENTRAL_DB_NAME=registry
@@ -104,7 +104,7 @@ Antes da primeira release, configure estes secrets do repositório no GitHub:
 Publicar uma GitHub Release associada à tag `vX.Y.Z` inicia o workflow de release. A publicação no Docker Hub só acontece depois que o commit pertence à `main`, a tag coincide com `package.json` e a imagem passou por todos os gates. O mesmo artefato testado recebe as tags:
 
 - `eduardomatuellacostaapps/ca:mcp-<run_number>`, para rastreabilidade do workflow;
-- `eduardomatuellacostaapps/ca:mcp-<versão>`, para seleção operacional, por exemplo `mcp-0.2.0`.
+- `eduardomatuellacostaapps/ca:mcp-<versão>`, para seleção operacional, por exemplo `mcp-0.2.1`.
 
 As referências são montadas usando o secret `DOCKERHUB_IMAGE`; o login usa `DOCKERHUB_USERNAME` e `DOCKERHUB_TOKEN`. O build e smoke da imagem usam uma tag local e não precisam de secrets Docker Hub. As duas tags devem apontar para o mesmo digest. O publicador verifica labels, plataforma e digest; se uma tag já existir com outra imagem, a publicação falha sem tentar substituí-la. Reexecuções reutilizam tags correspondentes e podem completar uma publicação parcial. O workflow não publica nem depende de `latest` e não executa SSH ou deploy remoto.
 
