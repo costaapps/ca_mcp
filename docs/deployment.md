@@ -5,10 +5,11 @@ O GitHub Actions valida e publica imagens no Docker Hub. Ele não acessa a VPS. 
 ## Pré-requisitos
 
 - VPS Linux com Docker Engine e Docker Compose v2 instalados.
+- Rede Docker externa `ai-shared` criada no host; o proxy HTTPS também deve estar conectado a ela.
 - A VPS consegue acessar o repositório, o Docker Hub e o Registry central, as bases autorizadas e os serviços Core necessários.
-- O proxy HTTPS existente encaminha para `127.0.0.1:3102`.
+- O proxy HTTPS existente encaminha para `mcp:3102` pela rede `ai-shared`.
 - Se o repositório de imagens for privado, configure no host credencial Docker Hub com permissão somente de leitura.
-- Antes de ativar a primeira release `0.2.0`, o AgentRuntime deve enviar `CompanyUUID` no metadata técnico de cada chamada MCP.
+- Antes de ativar a primeira release `0.2.1`, o AgentRuntime deve enviar `CompanyUUID` no metadata técnico de cada chamada MCP.
 
 ## Primeira instalação
 
@@ -24,7 +25,7 @@ chmod 600 .env
 Edite `.env` no host e defina a tag publicada e os valores reais do Runtime. Não versione nem compartilhe esse arquivo.
 
 ```dotenv
-MCP_IMAGE=eduardomatuellacostaapps/ca:mcp-0.2.0
+MCP_IMAGE=eduardomatuellacostaapps/ca:mcp-0.2.1
 CENTRAL_DB_HOST=db-central.internal
 CENTRAL_DB_PORT=3306
 CENTRAL_DB_NAME=registry
@@ -48,13 +49,47 @@ MCP_SHUTDOWN_TIMEOUT_MS=75000
 Suba e confira o serviço:
 
 ```sh
+docker network inspect ai-shared >/dev/null 2>&1 || docker network create ai-shared
 docker compose pull
 docker compose up -d
 docker compose ps
 curl -fsS http://127.0.0.1:3102/health/ready
 ```
 
-Valide também o endereço público pelo proxy HTTPS e uma chamada MCP do AgentRuntime. A porta do container é publicada somente no loopback da VPS.
+Valide também o endereço público pelo proxy HTTPS e uma chamada MCP do AgentRuntime. A porta publicada no host permanece restrita ao loopback da VPS.
+
+## Encaminhamento pelo Nginx
+
+O endpoint MCP é `/mcp`. Se o Nginx roda em container, conecte esse container à rede Docker externa `ai-shared` e inclua o bloco abaixo dentro do `server {}` HTTPS do domínio usado pelo AgentRuntime:
+
+```nginx
+location = /mcp {
+    proxy_pass http://mcp:3102/mcp;
+    proxy_http_version 1.1;
+
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header Connection "";
+
+    proxy_buffering off;
+    proxy_cache off;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+}
+```
+
+O nome `mcp` é o serviço definido em `compose.yaml`; o Nginx o resolve pela rede compartilhada. Depois de iniciar o Compose, valide a configuração e recarregue o Nginx. Em um Nginx instalado diretamente na VPS, use o upstream `http://127.0.0.1:3102/mcp` no `proxy_pass`; a porta do Compose está vinculada somente ao loopback do host. Não exponha a porta `3102` publicamente. Mantenha TLS no `server {}` HTTPS do Nginx e configure o AgentRuntime para usar `https://<domínio>/mcp`.
+
+Para Nginx instalado no host, valide e recarregue com:
+
+```sh
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+Se o Nginx também for um container, rode `nginx -t` e recarregue o container pelo mecanismo usado nessa instalação. Por fim, confirme o endpoint local do serviço com `curl -fsS http://127.0.0.1:3102/health/ready` e faça uma chamada MCP pelo domínio HTTPS.
 
 ## Publicação de releases
 
@@ -69,7 +104,7 @@ Antes da primeira release, configure estes secrets do repositório no GitHub:
 Publicar uma GitHub Release associada à tag `vX.Y.Z` inicia o workflow de release. A publicação no Docker Hub só acontece depois que o commit pertence à `main`, a tag coincide com `package.json` e a imagem passou por todos os gates. O mesmo artefato testado recebe as tags:
 
 - `eduardomatuellacostaapps/ca:mcp-<run_number>`, para rastreabilidade do workflow;
-- `eduardomatuellacostaapps/ca:mcp-<versão>`, para seleção operacional, por exemplo `mcp-0.2.0`.
+- `eduardomatuellacostaapps/ca:mcp-<versão>`, para seleção operacional, por exemplo `mcp-0.2.1`.
 
 As referências são montadas usando o secret `DOCKERHUB_IMAGE`; o login usa `DOCKERHUB_USERNAME` e `DOCKERHUB_TOKEN`. O build e smoke da imagem usam uma tag local e não precisam de secrets Docker Hub. As duas tags devem apontar para o mesmo digest. O publicador verifica labels, plataforma e digest; se uma tag já existir com outra imagem, a publicação falha sem tentar substituí-la. Reexecuções reutilizam tags correspondentes e podem completar uma publicação parcial. O workflow não publica nem depende de `latest` e não executa SSH ou deploy remoto.
 

@@ -10,8 +10,8 @@ trap 'rm -rf -- "$test_root"' EXIT
 
 readonly repository='eduardomatuellacostaapps/ca'
 readonly run_image="$repository:mcp-314"
-readonly version_image="$repository:mcp-0.2.0"
-readonly version='0.2.0'
+readonly version_image="$repository:mcp-0.2.1"
+readonly version='0.2.1'
 readonly revision='0123456789abcdef0123456789abcdef01234567'
 readonly run_number='314'
 readonly image_id='sha256:1111111111111111111111111111111111111111111111111111111111111111'
@@ -332,11 +332,10 @@ assert_workflow_line 'DOCKERHUB_IMAGE: ${{ secrets.DOCKERHUB_IMAGE }}'
 assert_workflow_line 'username: ${{ secrets.DOCKERHUB_USERNAME }}'
 assert_workflow_line 'docker tag "$TESTED_IMAGE" "$IMAGE"'
 assert_workflow_line 'echo "tested-image=ca-mcp-release:mcp-$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"'
-assert_workflow_line 'artifact-ids: ${{ needs.validate-and-build.outputs.artifact-id }}'
 assert_workflow_line 'name: mcp-release-image-${{ github.run_id }}-${{ github.run_attempt }}'
 assert_workflow_line 'password: ${{ secrets.DOCKERHUB_TOKEN }}'
-[[ $(grep -Fc '${{ github.run_attempt }}' "$release_workflow") == 1 ]] || fail 'run_attempt must appear only in the artifact name'
-[[ $(grep -Fc 'artifact-ids:' "$release_workflow") == 1 ]] || fail 'release image download must use the exported artifact ID'
+[[ $(grep -Fc '${{ github.run_attempt }}' "$release_workflow") == 2 ]] || fail 'run_attempt must appear in the upload and download artifact names'
+[[ $(grep -Fc 'name: mcp-release-image-${{ github.run_id }}-${{ github.run_attempt }}' "$release_workflow") == 2 ]] || fail 'release image upload and download must use the same per-attempt artifact name'
 [[ $(grep -Fc '${{ secrets.DOCKERHUB_TOKEN }}' "$release_workflow") == 1 ]] || fail 'Docker Hub token must only be consumed by the publisher'
 [[ $(grep -Fc '${{ secrets.DOCKERHUB_USERNAME }}' "$release_workflow") == 1 ]] || fail 'Docker Hub username secret must only be consumed by the publisher'
 [[ $(grep -Fc '${{ secrets.DOCKERHUB_IMAGE }}' "$release_workflow") == 1 ]] || fail 'Docker Hub image secret must be consumed only to derive release references'
