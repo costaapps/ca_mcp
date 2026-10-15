@@ -10,8 +10,8 @@ trap 'rm -rf -- "$test_root"' EXIT
 
 readonly repository='eduardomatuellacostaapps/ca'
 readonly run_image="$repository:mcp-314"
-readonly version_image="$repository:mcp-0.2.1"
-readonly version='0.2.1'
+readonly version_image="$repository:mcp-0.2.2"
+readonly version='0.2.2'
 readonly revision='0123456789abcdef0123456789abcdef01234567'
 readonly run_number='314'
 readonly image_id='sha256:1111111111111111111111111111111111111111111111111111111111111111'

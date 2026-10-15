@@ -7,7 +7,7 @@ trap 'rm -rf -- "$test_root"' EXIT
 
 cp "$repo_root/compose.yaml" "$test_root/compose.yaml"
 cat > "$test_root/.env" <<'EOF'
-MCP_IMAGE=eduardomatuellacostaapps/ca:mcp-0.2.1
+MCP_IMAGE=eduardomatuellacostaapps/ca:mcp-0.2.2
 CENTRAL_DB_HOST=registry.test.invalid
 CENTRAL_DB_PORT=3306
 CENTRAL_DB_NAME=registry_test
@@ -42,7 +42,7 @@ const fail = (message) => {
 };
 
 if (!service) fail('Compose does not define service mcp');
-if (service.image !== 'eduardomatuellacostaapps/ca:mcp-0.2.1') fail('MCP_IMAGE was not loaded from the root .env');
+if (service.image !== 'eduardomatuellacostaapps/ca:mcp-0.2.2') fail('MCP_IMAGE was not loaded from the root .env');
 if (service.environment?.NODE_ENV !== 'production' || String(service.environment?.PORT) !== '3102') fail('production process settings are missing');
 if (service.environment?.CENTRAL_DB_HOST !== 'registry.test.invalid' || service.environment?.CENTRAL_DB_NAME !== 'registry_test') fail('runtime settings were not loaded from the root .env');
 if (service.init !== true || service.restart !== 'unless-stopped') fail('init or restart policy changed');
