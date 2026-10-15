@@ -3,6 +3,8 @@ name: ca-mcp
 services:
   mcp:
     image: ${MCP_IMAGE:?set MCP_IMAGE to the published release tag}
+    networks:
+      - ai-shared
     init: true
     restart: unless-stopped
     read_only: true
@@ -46,3 +48,8 @@ services:
         max-file: "3"
     labels:
       com.costaapps.service: ca-mcp
+
+networks:
+  ai-shared:
+    external: true
+    name: ai-shared
