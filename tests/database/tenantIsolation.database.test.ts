@@ -139,7 +139,7 @@ describe('isolamento multi-tenant em MariaDB efêmero', () => {
     }));
     const port = await listen(server);
     transport = new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`));
-    client = new Client({ name: 'ca-mcp-tenant-db-test', version: '0.2.1' });
+    client = new Client({ name: 'ca-mcp-tenant-db-test', version: '0.2.2' });
     await client.connect(transport);
   }, 30000);
 
