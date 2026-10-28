@@ -30,7 +30,7 @@ npm run build
 npm start
 ```
 
-Preencha no `.env` a conexão central e a allowlist. O processo escuta em `PORT` (padrão `3102`) e expõe `/mcp` via Streamable HTTP, `/health` e `/health/live` como liveness e `/health/ready` para readiness do Registry e do estado de drenagem.
+Preencha no `.env` a conexão central e a allowlist. O processo valida o Registry central antes de abrir a API; se a conexão, o schema necessário ou a permissão de leitura falhar, o MCP encerra com erro sem começar a escutar. Depois de subir, escuta em `PORT` (padrão `3102`) e expõe `/mcp` via Streamable HTTP, `/health` e `/health/live` como liveness e `/health/ready` para readiness contínua do Registry e do estado de drenagem.
 
 Não há migrations produtivas neste repositório: `Message`, `ProcessLineFlow` e as tabelas de negócio são existentes nas bases do Core. O Registry central é somente leitura.
 

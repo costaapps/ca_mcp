@@ -76,7 +76,7 @@ A allowlist restringe quais empresas uma instalação atende. Ela não autentica
 
 ## Health, disponibilidade e limites operacionais
 
-`/health` permanece como liveness compatível; `/health/live` informa liveness e `/health/ready` verifica o Registry e o estado de drenagem. A verificação do Registry usa uma consulta sem linhas que referencia as tabelas e colunas necessárias à resolução, com timeout de 5 segundos; não seleciona uma empresa. Assim, schema incompleto, falta de permissão de leitura ou indisponibilidade central deixam o serviço not ready. Uma base de empresa indisponível afeta as chamadas dessa empresa, sem retirar a instalação inteira de readiness.
+Antes de abrir a API, o processo executa a mesma verificação do Registry central; se ela falhar, encerra com erro e não começa a escutar. `/health` permanece como liveness compatível; `/health/live` informa liveness e `/health/ready` verifica continuamente o Registry e o estado de drenagem. A verificação do Registry usa uma consulta sem linhas que referencia as tabelas e colunas necessárias à resolução, com timeout de 5 segundos; não seleciona uma empresa. Assim, schema incompleto, falta de permissão de leitura ou indisponibilidade central impedem a inicialização ou deixam o serviço not ready. Uma base de empresa indisponível afeta as chamadas dessa empresa, sem retirar a instalação inteira de readiness.
 
 No SIGTERM, o processo deixa de aceitar novas tools, espera as invocações em andamento até o prazo configurado e encerra pools e Registry. Logs de execução identificam a empresa, a base e os IDs de correlação disponíveis, sem credenciais, SQL bruto ou payloads de negócio.
 
